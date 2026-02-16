@@ -1334,11 +1334,19 @@ uint32_t sde_populate_formats(
 			pixel_formats[i] = format_list->fourcc_format;
 			pixel_modifiers[i++] = format_list->modifier;
 		} else {
-			/* assume base formats grouped together */
-			if (fourcc_format != format_list->fourcc_format) {
-				fourcc_format = format_list->fourcc_format;
-				pixel_formats[i++] = fourcc_format;
+			/* ensure base formats are unique in the legacy list */
+			bool found = false;
+			uint32_t j;
+
+			for (j = 0; j < i; j++) {
+				if (pixel_formats[j] == format_list->fourcc_format) {
+					found = true;
+					break;
+				}
 			}
+
+			if (!found)
+				pixel_formats[i++] = format_list->fourcc_format;
 		}
 	}
 
