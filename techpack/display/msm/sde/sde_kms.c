@@ -17,6 +17,7 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "sde_hw_mdss.h"
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
 
 #include <drm/drm_crtc.h>
@@ -1714,6 +1715,8 @@ static int _sde_kms_drm_obj_init(struct sde_kms *sde_kms)
 	u32 master_plane_id[MAX_PLANES];
 	u32 num_virt_planes = 0;
 
+	enum sde_sspp r_pipe;
+
 	if (!sde_kms || !sde_kms->dev || !sde_kms->dev->dev) {
 		SDE_ERROR("invalid sde_kms\n");
 		return -EINVAL;
@@ -1743,6 +1746,12 @@ static int _sde_kms_drm_obj_init(struct sde_kms *sde_kms)
 			|| primary_planes_idx >= max_crtc_count)
 			primary = false;
 
+		// If previous plane use current as a side plane, skip it
+		r_pipe = sde_plane_get_right_pipe(catalog->sspp[i].id - 1);
+		if (r_pipe == catalog->sspp[i].id) {
+			SDE_DEBUG("skipping side pipe reserved for source split: %d\n", r_pipe);
+			continue;
+		}
 		plane = sde_plane_init(dev, catalog->sspp[i].id, primary,
 				(1UL << max_crtc_count) - 1, 0);
 		if (IS_ERR(plane)) {

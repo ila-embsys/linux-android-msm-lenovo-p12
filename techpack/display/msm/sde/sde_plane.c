@@ -16,6 +16,7 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include "sde_hw_mdss.h"
 #define pr_fmt(fmt)	"[drm:%s:%d] " fmt, __func__, __LINE__
 
 #include <linux/debugfs.h>
@@ -84,64 +85,6 @@ enum sde_plane_qos {
 	SDE_PLANE_QOS_VBLANK_AMORTIZE = BIT(1),
 	SDE_PLANE_QOS_PANIC_CTRL = BIT(2),
 };
-
-/*
- * struct sde_plane - local sde plane structure
- * @aspace: address space pointer
- * @csc_cfg: Decoded user configuration for csc
- * @csc_usr_ptr: Points to csc_cfg if valid user config available
- * @csc_ptr: Points to sde_csc_cfg structure to use for current
- * @mplane_list: List of multirect planes of the same pipe
- * @catalog: Points to sde catalog structure
- * @revalidate: force revalidation of all the plane properties
- * @xin_halt_forced_clk: whether or not clocks were forced on for xin halt
- * @blob_rot_caps: Pointer to rotator capability blob
- */
-struct sde_plane {
-	struct drm_plane base;
-
-	struct mutex lock;
-
-	enum sde_sspp pipe;
-	uint32_t features;      /* capabilities from catalog */
-	uint32_t perf_features; /* perf capabilities from catalog */
-	uint32_t nformats;
-	uint32_t formats[64];
-
-	struct sde_hw_pipe *pipe_hw;
-	struct sde_hw_pipe_cfg pipe_cfg;
-	struct sde_hw_sharp_cfg sharp_cfg;
-	struct sde_hw_pipe_qos_cfg pipe_qos_cfg;
-	struct sde_vbif_set_qos_params cached_qos_params;
-	uint32_t color_fill;
-	bool is_error;
-	bool is_rt_pipe;
-	bool is_virtual;
-	struct list_head mplane_list;
-	struct sde_mdss_cfg *catalog;
-	bool revalidate;
-	bool xin_halt_forced_clk;
-
-	struct sde_csc_cfg csc_cfg;
-	struct sde_csc_cfg *csc_usr_ptr;
-	struct sde_csc_cfg *csc_ptr;
-
-	uint32_t cached_lut_flag;
-	const struct sde_sspp_sub_blks *pipe_sblk;
-
-	char pipe_name[SDE_NAME_SIZE];
-
-	struct msm_property_info property_info;
-	struct msm_property_data property_data[PLANE_PROP_COUNT];
-	struct drm_property_blob *blob_info;
-	struct drm_property_blob *blob_rot_caps;
-
-	/* debugfs related stuff */
-	struct dentry *debugfs_root;
-	bool debugfs_default_scale;
-};
-
-#define to_sde_plane(x) container_of(x, struct sde_plane, base)
 
 static int plane_prop_array[PLANE_PROP_COUNT] = {SDE_PLANE_DIRTY_ALL};
 
@@ -232,6 +175,9 @@ void sde_plane_setup_src_split_order(struct drm_plane *plane,
 	psde = to_sde_plane(plane);
 	if (psde->pipe_hw->ops.set_src_split_order)
 		psde->pipe_hw->ops.set_src_split_order(psde->pipe_hw,
+					rect_mode, enable);
+	if (psde->r_pipe_hw && psde->r_pipe_hw->ops.set_src_split_order)
+		psde->r_pipe_hw->ops.set_src_split_order(psde->r_pipe_hw,
 					rect_mode, enable);
 }
 
@@ -325,6 +271,9 @@ static void _sde_plane_set_qos_lut(struct drm_plane *plane,
 		psde->pipe_qos_cfg.creq_lut);
 
 	psde->pipe_hw->ops.setup_qos_lut(psde->pipe_hw, &psde->pipe_qos_cfg);
+	if (psde->r_pipe_hw){
+		psde->r_pipe_hw->ops.setup_qos_lut(psde->r_pipe_hw, &psde->pipe_qos_cfg);
+	}
 }
 
 /**
@@ -384,6 +333,10 @@ static void _sde_plane_set_qos_ctrl(struct drm_plane *plane,
 
 	psde->pipe_hw->ops.setup_qos_ctrl(psde->pipe_hw,
 			&psde->pipe_qos_cfg);
+	if (psde->r_pipe_hw) {
+		psde->r_pipe_hw->ops.setup_qos_ctrl(psde->r_pipe_hw,
+				&psde->pipe_qos_cfg);
+	}
 }
 
 void sde_plane_set_revalidate(struct drm_plane *plane, bool enable)
@@ -576,6 +529,10 @@ static void _sde_plane_set_ts_prefill(struct drm_plane *plane,
 	SDE_EVT32_VERBOSE(DRMID(plane), cfg.size, cfg.time);
 	psde->pipe_hw->ops.setup_ts_prefill(psde->pipe_hw, &cfg,
 			pstate->multirect_index);
+	if (psde->r_pipe_hw) {
+		psde->r_pipe_hw->ops.setup_ts_prefill(psde->r_pipe_hw, &cfg,
+				pstate->multirect_index);
+	}
 }
 
 /* helper to update a state's input fence pointer from the property */
@@ -710,7 +667,9 @@ static int _sde_plane_get_aspace(
 
 static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 		struct sde_plane_state *pstate,
+		struct sde_hw_pipe *pipe_hw,
 		struct sde_hw_pipe_cfg *pipe_cfg,
+		uint32_t multirect_index,
 		struct drm_framebuffer *fb)
 {
 	struct sde_plane *psde;
@@ -726,7 +685,7 @@ static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 	}
 
 	psde = to_sde_plane(plane);
-	if (!psde->pipe_hw) {
+	if (!pipe_hw) {
 		SDE_ERROR_PLANE(psde, "invalid pipe_hw\n");
 		return;
 	}
@@ -757,19 +716,42 @@ static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 	if ((mode == SDE_DRM_FB_SEC) || (mode == SDE_DRM_FB_SEC_DIR_TRANS))
 		secure = true;
 
-	ret = sde_format_populate_layout(aspace, fb, &pipe_cfg->layout);
+	ret = sde_format_populate_layout_with_roi(aspace, fb,
+			&pipe_cfg->src_rect, &pipe_cfg->layout);
 	if (ret == -EAGAIN)
 		SDE_DEBUG_PLANE(psde, "not updating same src addrs\n");
 	else if (ret) {
-		SDE_ERROR_PLANE(psde, "failed to get format layout, %d\n", ret);
-
 		/*
-		 * Force solid fill color on error. This is to prevent
-		 * smmu faults during secure session transition.
+		 * If ROI population fails for UBWC (likely due to non-linear check),
+		 * fall back to standard layout population (base address).
+		 * The HW will handle cropping via src_rect.
 		 */
-		psde->is_error = true;
-	} else if (psde->pipe_hw->ops.setup_sourceaddress) {
-		SDE_EVT32_VERBOSE(psde->pipe_hw->idx,
+		if (ret == -EINVAL && SDE_FORMAT_IS_UBWC(pipe_cfg->layout.format)) {
+			ret = sde_format_populate_layout(aspace, fb, &pipe_cfg->layout);
+			if (ret) {
+				SDE_ERROR_PLANE(psde, "failed to populate layout fallback, %d\n", ret);
+				psde->is_error = true;
+			}
+		} else {
+			SDE_ERROR_PLANE(psde, "failed to get format layout, %d\n", ret);
+
+			/*
+			 * Force solid fill color on error. This is to prevent
+			 * smmu faults during secure session transition.
+			 */
+			psde->is_error = true;
+		}
+	} else if (pipe_hw->ops.setup_sourceaddress) {
+		SDE_DEBUG("programing SSPP[%u] source addess with w: %u, h: %u, addr0: %u, size0: %u, addr1: %u, addr2: %u, addr3: %u, multirect_index: %u",
+			pipe_hw->idx, pipe_cfg->layout.width, pipe_cfg->layout.height,
+			pipe_cfg->layout.plane_addr[0],
+			pipe_cfg->layout.plane_size[0],
+			pipe_cfg->layout.plane_addr[1],
+			pipe_cfg->layout.plane_addr[2],
+			pipe_cfg->layout.plane_addr[3],
+			multirect_index
+		);
+		SDE_EVT32_VERBOSE(pipe_hw->idx,
 				pipe_cfg->layout.width,
 				pipe_cfg->layout.height,
 				pipe_cfg->layout.plane_addr[0],
@@ -780,10 +762,10 @@ static inline void _sde_plane_set_scanout(struct drm_plane *plane,
 				pipe_cfg->layout.plane_size[2],
 				pipe_cfg->layout.plane_addr[3],
 				pipe_cfg->layout.plane_size[3],
-				pstate->multirect_index,
+				multirect_index,
 				secure);
-		psde->pipe_hw->ops.setup_sourceaddress(psde->pipe_hw, pipe_cfg,
-						pstate->multirect_index);
+		pipe_hw->ops.setup_sourceaddress(pipe_hw, pipe_cfg,
+						multirect_index);
 	}
 }
 
@@ -1364,6 +1346,9 @@ static void _sde_plane_setup_scaler(struct sde_plane *psde,
 	if (psde->pipe_hw->ops.setup_pre_downscale)
 		psde->pipe_hw->ops.setup_pre_downscale(psde->pipe_hw,
 				&pstate->pre_down);
+	if (psde->r_pipe_hw && psde->r_pipe_hw->ops.setup_pre_downscale)
+		psde->r_pipe_hw->ops.setup_pre_downscale(psde->r_pipe_hw,
+				&pstate->pre_down);
 }
 
 /**
@@ -1437,6 +1422,42 @@ static int _sde_plane_color_fill(struct sde_plane *psde,
 			psde->pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
 			psde->pipe_hw->ops.setup_scaler(psde->pipe_hw,
 					&psde->pipe_cfg, &pstate->pixel_ext,
+					&pstate->scaler3_cfg);
+		}
+	}
+
+	/* update side sspp */
+	if (fmt && psde->r_pipe_hw && psde->r_pipe_hw->ops.setup_solidfill) {
+		psde->r_pipe_hw->ops.setup_solidfill(psde->r_pipe_hw,
+				(color & 0xFFFFFF) | ((alpha & 0xFF) << 24),
+				pstate->multirect_index);
+
+		/* override scaler/decimation if solid fill */
+		psde->r_pipe_cfg.src_rect.x = 0;
+		psde->r_pipe_cfg.src_rect.y = 0;
+		psde->r_pipe_cfg.src_rect.w = psde->r_pipe_cfg.dst_rect.w;
+		psde->r_pipe_cfg.src_rect.h = psde->r_pipe_cfg.dst_rect.h;
+		_sde_plane_setup_scaler(psde, pstate, fmt, true);
+
+		if (psde->r_pipe_hw->ops.setup_format)
+			psde->r_pipe_hw->ops.setup_format(psde->r_pipe_hw,
+					fmt, blend_enable,
+					SDE_SSPP_SOLID_FILL,
+					pstate->multirect_index);
+
+		if (psde->r_pipe_hw->ops.setup_rects)
+			psde->r_pipe_hw->ops.setup_rects(psde->r_pipe_hw,
+					&psde->r_pipe_cfg,
+					pstate->multirect_index);
+
+		if (psde->r_pipe_hw->ops.setup_pe)
+			psde->r_pipe_hw->ops.setup_pe(psde->r_pipe_hw,
+					&pstate->pixel_ext);
+		if (psde->r_pipe_hw->ops.setup_scaler &&
+				pstate->multirect_index != SDE_SSPP_RECT_0) {
+			psde->r_pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
+			psde->r_pipe_hw->ops.setup_scaler(psde->r_pipe_hw,
+					&psde->r_pipe_cfg, &pstate->pixel_ext,
 					&pstate->scaler3_cfg);
 		}
 	}
@@ -1741,10 +1762,10 @@ int sde_plane_validate_multirect_v2(struct sde_multirect_plane_states *plane)
 		 * whereas linear formats need only 2 lines.
 		 * So we cannot support more than half of the supported SSPP
 		 * width for tiled formats.
-		 */
-		width_threshold[i] = sde_plane[i]->pipe_sblk->maxlinewidth;
-		if (SDE_FORMAT_IS_UBWC(fmt[i]))
-			width_threshold[i] /= 2;
+        */
+        width_threshold[i] = sde_plane[i]->pipe_sblk->maxlinewidth;
+        if (SDE_FORMAT_IS_UBWC(fmt[i]))
+            width_threshold[i] /= 2;
 
 		if (parallel_fetch_qualified && src[i].w > width_threshold[i])
 			parallel_fetch_qualified = false;
@@ -2456,6 +2477,13 @@ static int _sde_atomic_check_decimation_scaler(struct drm_plane_state *state,
 		ret = -EINVAL;
 
 	/* check decimated source width */
+	} else if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+		if (scaler_src_w > (max_linewidth * 2)) {
+			SDE_ERROR_PLANE(psde,
+				"invalid src w:%u for split display max:%u\n",
+				scaler_src_w, (max_linewidth * 2));
+			ret = -E2BIG;
+		}
 	} else if (scaler_src_w > max_linewidth) {
 		SDE_ERROR_PLANE(psde,
 			"invalid src w:%u, deci w:%u, line w:%u, rot: %d\n",
@@ -2610,6 +2638,7 @@ static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 	struct drm_framebuffer *fb;
 	u32 width;
 	u32 height;
+	uint32_t max_linewidth;
 
 	psde = to_sde_plane(plane);
 	pstate = to_sde_plane_state(state);
@@ -2651,6 +2680,34 @@ static int sde_plane_sspp_atomic_check(struct drm_plane *plane,
 	fmt = to_sde_format(msm_fmt);
 
 	min_src_size = SDE_FORMAT_IS_YUV(fmt) ? 2 : 1;
+
+	max_linewidth = psde->pipe_sblk->maxlinewidth;
+
+	SDE_DEBUG_PLANE(psde, "max_linewidth: %d\n", max_linewidth);
+	if (src.w > max_linewidth) {
+		SDE_DEBUG_PLANE(psde, "source plane is wider than pipe max linewidth\n");
+		if (psde->r_pipe_hw && src.w <= (max_linewidth * 2) &&
+				!SDE_FORMAT_IS_YUV(fmt) &&
+				(pstate->rotation & DRM_MODE_ROTATE_0 || !pstate->rotation) &&
+				(pstate->multirect_mode == SDE_SSPP_MULTIRECT_NONE || pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL)) {
+			SDE_DEBUG_PLANE(psde, "setting up for split display\n");
+			pstate->multirect_mode = SDE_SSPP_MULTIRECT_PARALLEL;
+		} else {
+			SDE_ERROR_PLANE(psde, "source split configurations has been skipped.\n");
+			if (!psde->r_pipe_hw) {
+				SDE_ERROR_PLANE(psde, "no side hw pipe\n");
+			}
+			if (!(src.w <= (max_linewidth * 2))) {
+				SDE_ERROR_PLANE(psde, "source width '%d' more then max linewidth '%d' * 2\n", src.w, max_linewidth);
+			}
+			if (!(pstate->rotation & DRM_MODE_ROTATE_0 || !pstate->rotation)) {
+				SDE_ERROR_PLANE(psde, "rotation mode is not 0: %d\n", pstate->rotation);
+			}
+			if (pstate->multirect_mode != SDE_SSPP_MULTIRECT_NONE) {
+				SDE_ERROR_PLANE(psde, "multirect mode is not none: %d\n", pstate->multirect_mode);
+			}
+		}
+	}
 
 	if (SDE_FORMAT_IS_YUV(fmt) &&
 		(!(psde->features & SDE_SSPP_SCALER) ||
@@ -2778,8 +2835,12 @@ void sde_plane_flush(struct drm_plane *plane)
 	else if (psde->color_fill & SDE_PLANE_COLOR_FILL_FLAG)
 		/* force 100% alpha */
 		_sde_plane_color_fill(psde, psde->color_fill, 0xFF);
-	else if (psde->pipe_hw && psde->csc_ptr && psde->pipe_hw->ops.setup_csc)
-		psde->pipe_hw->ops.setup_csc(psde->pipe_hw, psde->csc_ptr);
+	else {
+		if (psde->pipe_hw && psde->csc_ptr && psde->pipe_hw->ops.setup_csc)
+			psde->pipe_hw->ops.setup_csc(psde->pipe_hw, psde->csc_ptr);
+		if (psde->r_pipe_hw && psde->csc_ptr && psde->r_pipe_hw->ops.setup_csc)
+			psde->r_pipe_hw->ops.setup_csc(psde->r_pipe_hw, psde->csc_ptr);
+	}
 
 	/* flag h/w flush complete */
 	if (plane->state)
@@ -2827,6 +2888,11 @@ static void _sde_plane_sspp_setup_sys_cache(struct sde_plane *psde,
 
 	psde->pipe_hw->ops.setup_sys_cache(
 		psde->pipe_hw, &pstate->sc_cfg);
+
+	if (psde->r_pipe_hw) {
+		psde->r_pipe_hw->ops.setup_sys_cache(
+		psde->r_pipe_hw, &pstate->sc_cfg);
+	}
 }
 
 static void _sde_plane_map_prop_to_dirty_bits(void)
@@ -2937,6 +3003,12 @@ static void _sde_plane_setup_uidle(struct drm_crtc *crtc,
 	psde->pipe_hw->ops.setup_uidle(
 		psde->pipe_hw, &cfg,
 		pstate->multirect_index);
+
+	if (psde->r_pipe_hw) {		
+		psde->r_pipe_hw->ops.setup_uidle(
+			psde->r_pipe_hw, &cfg,
+			pstate->multirect_index);
+	}
 }
 
 static void _sde_plane_update_secure_session(struct sde_plane *psde,
@@ -2954,6 +3026,11 @@ static void _sde_plane_update_secure_session(struct sde_plane *psde,
 	psde->pipe_hw->ops.setup_secure_address(psde->pipe_hw,
 			pstate->multirect_index,
 			enable);
+	if (psde->r_pipe_hw) {
+		psde->r_pipe_hw->ops.setup_secure_address(psde->r_pipe_hw,
+				pstate->multirect_index,
+				enable);
+	}
 }
 
 static void _sde_plane_update_roi_config(struct drm_plane *plane,
@@ -3017,8 +3094,64 @@ static void _sde_plane_update_roi_config(struct drm_plane *plane,
 	if (psde->pipe_hw->ops.setup_uidle)
 		_sde_plane_setup_uidle(crtc, psde, pstate, &src, &dst);
 
-	psde->pipe_cfg.src_rect = src;
-	psde->pipe_cfg.dst_rect = dst;
+	if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+		struct sde_rect l_src, r_src, l_dst, r_dst;
+
+		l_src = src;
+		l_src.w /= 2;
+
+		r_src = src;
+		r_src.x += l_src.w;
+		r_src.w -= l_src.w;
+
+		l_dst = dst;
+		l_dst.w /= 2;
+
+		r_dst = dst;
+		r_dst.x += l_dst.w;
+		r_dst.w -= l_dst.w;
+
+		psde->r_pipe_cfg = psde->pipe_cfg;
+
+		psde->pipe_cfg.src_rect = l_src;
+		psde->pipe_cfg.dst_rect = l_dst;
+
+		SDE_DEBUG_PLANE(psde, "setting up scanout for left pipe. start: %d width: %d \n",
+			psde->pipe_cfg.src_rect.x,
+			psde->pipe_cfg.src_rect.w);
+
+		_sde_plane_set_scanout(plane, pstate, psde->pipe_hw,
+				&psde->pipe_cfg, SDE_SSPP_RECT_SOLO, fb);
+
+		/*
+		 * set_scanout programs the source address based on src_rect.
+		 * setup_rects (called later) adds src_rect.x/y to the address.
+		 * To avoid double-offsetting, we must zero out the src_rect.x/y
+		 * for the pipe configuration after the address is set.
+		 */
+		psde->pipe_cfg.src_rect.x = 0;
+		psde->pipe_cfg.src_rect.y = 0;
+
+		psde->r_pipe_cfg.src_rect = r_src;
+		psde->r_pipe_cfg.dst_rect = r_dst;
+
+		SDE_DEBUG_PLANE(psde, "setting up scanout for right pipe. start: %d width: %d \n",
+			psde->r_pipe_cfg.src_rect.x,
+			psde->r_pipe_cfg.src_rect.w);
+
+		_sde_plane_set_scanout(plane, pstate, psde->r_pipe_hw,
+				&psde->r_pipe_cfg, SDE_SSPP_RECT_SOLO, fb);
+
+		/* Zero out r_pipe src_rect xy to prevent double-offset addition by setup_rects */
+		psde->r_pipe_cfg.src_rect.x = 0;
+		psde->r_pipe_cfg.src_rect.y = 0;
+
+	} else {
+		psde->pipe_cfg.src_rect = src;
+		psde->pipe_cfg.dst_rect = dst;
+		_sde_plane_set_scanout(plane, pstate, psde->pipe_hw,
+				&psde->pipe_cfg, pstate->multirect_index, fb);
+	}
 
 	_sde_plane_setup_scaler(psde, pstate, fmt, false);
 
@@ -3029,27 +3162,55 @@ static void _sde_plane_update_roi_config(struct drm_plane *plane,
 		/* skip remaining processing on color fill */
 		pstate->dirty = 0x0;
 	} else if (psde->pipe_hw->ops.setup_rects) {
-		psde->pipe_hw->ops.setup_rects(psde->pipe_hw,
-				&psde->pipe_cfg,
-				pstate->multirect_index);
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_rects(psde->pipe_hw,
+					&psde->pipe_cfg, SDE_SSPP_RECT_SOLO);
+			if (psde->r_pipe_hw && psde->r_pipe_hw->ops.setup_rects)
+				psde->r_pipe_hw->ops.setup_rects(psde->r_pipe_hw,
+						&psde->r_pipe_cfg, SDE_SSPP_RECT_SOLO);
+		} else {
+			psde->pipe_hw->ops.setup_rects(psde->pipe_hw,
+					&psde->pipe_cfg,
+					pstate->multirect_index);
+		}
 	}
 
-	if (psde->pipe_hw->ops.setup_pe &&
-			(pstate->multirect_index != SDE_SSPP_RECT_1))
-		psde->pipe_hw->ops.setup_pe(psde->pipe_hw,
-				&pstate->pixel_ext);
+	if (psde->pipe_hw->ops.setup_pe) {
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_pe(psde->pipe_hw,
+					&pstate->pixel_ext);
+			if (psde->r_pipe_hw)
+				psde->r_pipe_hw->ops.setup_pe(psde->r_pipe_hw,
+						&pstate->pixel_ext);
+		} else if (pstate->multirect_index != SDE_SSPP_RECT_1) {
+			psde->pipe_hw->ops.setup_pe(psde->pipe_hw,
+					&pstate->pixel_ext);
+		}
+	}
 
 	/**
 	 * when programmed in multirect mode, scalar block will be
 	 * bypassed. Still we need to update alpha and bitwidth
 	 * ONLY for RECT0
 	 */
-	if (psde->pipe_hw->ops.setup_scaler &&
-			pstate->multirect_index != SDE_SSPP_RECT_1) {
-		psde->pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
-		psde->pipe_hw->ops.setup_scaler(psde->pipe_hw,
-				&psde->pipe_cfg, &pstate->pixel_ext,
-				&pstate->scaler3_cfg);
+	if (psde->pipe_hw->ops.setup_scaler) {
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
+			psde->pipe_hw->ops.setup_scaler(psde->pipe_hw,
+					&psde->pipe_cfg, &pstate->pixel_ext,
+					&pstate->scaler3_cfg);
+			if (psde->r_pipe_hw) {
+				psde->r_pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
+				psde->r_pipe_hw->ops.setup_scaler(psde->r_pipe_hw,
+						&psde->r_pipe_cfg, &pstate->pixel_ext,
+						&pstate->scaler3_cfg);
+			}
+		} else if (pstate->multirect_index != SDE_SSPP_RECT_1) {
+			psde->pipe_hw->ctl = _sde_plane_get_hw_ctl(plane);
+			psde->pipe_hw->ops.setup_scaler(psde->pipe_hw,
+					&psde->pipe_cfg, &pstate->pixel_ext,
+					&pstate->scaler3_cfg);
+		}
 	}
 
 	/* update excl rect */
@@ -3058,11 +3219,22 @@ static void _sde_plane_update_roi_config(struct drm_plane *plane,
 				&pstate->excl_rect,
 				pstate->multirect_index);
 
-	if (psde->pipe_hw->ops.setup_multirect)
-		psde->pipe_hw->ops.setup_multirect(
-				psde->pipe_hw,
-				pstate->multirect_index,
-				pstate->multirect_mode);
+	if (psde->pipe_hw->ops.setup_multirect) {
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_multirect(psde->pipe_hw,
+					SDE_SSPP_RECT_SOLO, SDE_SSPP_MULTIRECT_NONE);
+			if (psde->r_pipe_hw)
+				psde->r_pipe_hw->ops.setup_multirect(
+						psde->r_pipe_hw,
+						SDE_SSPP_RECT_SOLO,
+						pstate->multirect_mode);
+		} else {
+			psde->pipe_hw->ops.setup_multirect(
+					psde->pipe_hw,
+					pstate->multirect_index,
+					pstate->multirect_mode);
+		}
+	}
 }
 
 static void _sde_plane_update_format_and_rects(struct sde_plane *psde,
@@ -3079,9 +3251,19 @@ static void _sde_plane_update_format_and_rects(struct sde_plane *psde,
 		src_flags |= SDE_SSPP_ROT_90;
 
 	/* update format */
-	psde->pipe_hw->ops.setup_format(psde->pipe_hw, fmt,
-	   pstate->const_alpha_en, src_flags,
-	   pstate->multirect_index);
+	if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+		psde->pipe_hw->ops.setup_format(psde->pipe_hw, fmt,
+				pstate->const_alpha_en, src_flags,
+				SDE_SSPP_RECT_SOLO);
+		if (psde->r_pipe_hw)
+			psde->r_pipe_hw->ops.setup_format(psde->r_pipe_hw, fmt,
+					pstate->const_alpha_en, src_flags,
+					SDE_SSPP_RECT_SOLO);
+	} else {
+		psde->pipe_hw->ops.setup_format(psde->pipe_hw, fmt,
+				pstate->const_alpha_en, src_flags,
+				pstate->multirect_index);
+	}
 
 	if (psde->pipe_hw->ops.setup_cdp) {
 		struct sde_hw_pipe_cdp_cfg *cdp_cfg = &pstate->cdp_cfg;
@@ -3097,8 +3279,16 @@ static void _sde_plane_update_format_and_rects(struct sde_plane *psde,
 			   SDE_FORMAT_IS_TILE(fmt);
 		cdp_cfg->preload_ahead = SDE_WB_CDP_PRELOAD_AHEAD_64;
 
-		psde->pipe_hw->ops.setup_cdp(psde->pipe_hw, cdp_cfg,
-			   pstate->multirect_index);
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_cdp(psde->pipe_hw, cdp_cfg,
+					SDE_SSPP_RECT_SOLO);
+			if (psde->r_pipe_hw)
+				psde->r_pipe_hw->ops.setup_cdp(psde->r_pipe_hw,
+						cdp_cfg, SDE_SSPP_RECT_SOLO);
+		} else {
+			psde->pipe_hw->ops.setup_cdp(psde->pipe_hw, cdp_cfg,
+					pstate->multirect_index);
+		}
 	}
 
 	_sde_plane_sspp_setup_sys_cache(psde, pstate, fmt);
@@ -3115,13 +3305,34 @@ static void _sde_plane_update_format_and_rects(struct sde_plane *psde,
 		if (fmt->alpha_enable)
 			pma_mode = (uint32_t) sde_plane_get_property(
 				pstate, PLANE_PROP_INVERSE_PMA);
-		psde->pipe_hw->ops.setup_inverse_pma(psde->pipe_hw,
-			pstate->multirect_index, pma_mode);
+
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_inverse_pma(psde->pipe_hw,
+					SDE_SSPP_RECT_SOLO, pma_mode);
+			if (psde->r_pipe_hw)
+				psde->r_pipe_hw->ops.setup_inverse_pma(
+						psde->r_pipe_hw,
+						SDE_SSPP_RECT_SOLO, pma_mode);
+		} else {
+			psde->pipe_hw->ops.setup_inverse_pma(psde->pipe_hw,
+					pstate->multirect_index, pma_mode);
+		}
 	}
 
-	if (psde->pipe_hw->ops.setup_dgm_csc)
-		psde->pipe_hw->ops.setup_dgm_csc(psde->pipe_hw,
-			pstate->multirect_index, psde->csc_usr_ptr);
+	if (psde->pipe_hw->ops.setup_dgm_csc) {
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			psde->pipe_hw->ops.setup_dgm_csc(psde->pipe_hw,
+					SDE_SSPP_RECT_SOLO, psde->csc_usr_ptr);
+			if (psde->r_pipe_hw)
+				psde->r_pipe_hw->ops.setup_dgm_csc(
+						psde->r_pipe_hw,
+						SDE_SSPP_RECT_SOLO,
+						psde->csc_usr_ptr);
+		} else {
+			psde->pipe_hw->ops.setup_dgm_csc(psde->pipe_hw,
+					pstate->multirect_index, psde->csc_usr_ptr);
+		}
+	}
 }
 
 static void _sde_plane_update_sharpening(struct sde_plane *psde)
@@ -3133,6 +3344,11 @@ static void _sde_plane_update_sharpening(struct sde_plane *psde)
 
 	psde->pipe_hw->ops.setup_sharpening(psde->pipe_hw,
 			&psde->sharp_cfg);
+		
+	if (psde->r_pipe_hw) {
+		psde->r_pipe_hw->ops.setup_sharpening(psde->r_pipe_hw,
+				&psde->sharp_cfg);
+	}
 }
 
 static void _sde_plane_update_properties(struct drm_plane *plane,
@@ -3305,10 +3521,10 @@ static int sde_plane_sspp_atomic_update(struct drm_plane *plane,
 	if (sde_crtc_is_crtc_roi_dirty(crtc->state))
 		pstate->dirty |= SDE_PLANE_DIRTY_RECTS;
 
-	if (pstate->dirty & SDE_PLANE_DIRTY_RECTS)
+	if (pstate->dirty & SDE_PLANE_DIRTY_RECTS) {
 		memset(&(psde->pipe_cfg), 0, sizeof(struct sde_hw_pipe_cfg));
-
-	_sde_plane_set_scanout(plane, pstate, &psde->pipe_cfg, fb);
+		memset(&(psde->r_pipe_cfg), 0, sizeof(struct sde_hw_pipe_cfg));
+	}
 
 	/* early out if nothing dirty */
 	if (!pstate->dirty)
@@ -4136,6 +4352,8 @@ static void sde_plane_destroy(struct drm_plane *plane)
 		/* this will destroy the states as well */
 		drm_plane_cleanup(plane);
 
+		if (psde->r_pipe_hw)
+			sde_hw_sspp_destroy(psde->r_pipe_hw);
 		if (psde->pipe_hw)
 			sde_hw_sspp_destroy(psde->pipe_hw);
 
@@ -4316,6 +4534,10 @@ void sde_plane_clear_ubwc_error(struct drm_plane *plane)
 
 	if (psde->pipe_hw->ops.clear_ubwc_error)
 		psde->pipe_hw->ops.clear_ubwc_error(psde->pipe_hw);
+
+
+	if (psde->r_pipe_hw && psde->r_pipe_hw->ops.clear_ubwc_error)
+		psde->r_pipe_hw->ops.clear_ubwc_error(psde->r_pipe_hw);
 }
 
 #ifdef CONFIG_DEBUG_FS
@@ -4629,6 +4851,20 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 		goto clean_sspp;
 	}
 
+	/* initialize underlying side h/w driver */
+	psde->r_pipe = sde_plane_get_right_pipe(pipe);
+	if (psde->r_pipe != SSPP_NONE) {
+		SDE_DEBUG("[%u]SSPP initializing side pipe\n", psde->r_pipe);
+		psde->r_pipe_hw = sde_hw_sspp_init(psde->r_pipe, kms->mmio, kms->catalog,
+				master_plane_id != 0);
+		if (IS_ERR_OR_NULL(psde->r_pipe_hw)) {
+			SDE_ERROR("[%u]SSPP init failed\n", psde->r_pipe);
+			psde->r_pipe_hw = NULL;
+		}
+	} else {
+		SDE_ERROR("[%u]SSPP no side pipe\n", pipe);
+	}
+
 	/* cache features mask for later */
 	psde->features = psde->pipe_hw->cap->features;
 	psde->perf_features = psde->pipe_hw->cap->perf_features;
@@ -4688,6 +4924,8 @@ struct drm_plane *sde_plane_init(struct drm_device *dev,
 	return plane;
 
 clean_sspp:
+	if (psde && psde->r_pipe_hw)
+		sde_hw_sspp_destroy(psde->pipe_hw);
 	if (psde && psde->pipe_hw)
 		sde_hw_sspp_destroy(psde->pipe_hw);
 clean_plane:

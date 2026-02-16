@@ -19,6 +19,9 @@
 #ifndef _SDE_CRTC_H_
 #define _SDE_CRTC_H_
 
+struct plane_state;
+
+
 #include <linux/kthread.h>
 #include <linux/of_fdt.h>
 #include <drm/drm_crtc.h>
@@ -27,6 +30,7 @@
 #include "sde_kms.h"
 #include "sde_core_perf.h"
 #include "sde_hw_ds.h"
+#include "sde_plane.h"
 
 #define SDE_CRTC_NAME_SIZE	12
 #define RGB_NUM_COMPONENTS	3
@@ -425,6 +429,9 @@ struct sde_crtc_state {
 	struct sde_rect lm_bounds[CRTC_DUAL_MIXERS];
 	struct sde_rect lm_roi[CRTC_DUAL_MIXERS];
 	struct msm_roi_list user_roi_list;
+
+	struct plane_state *crtc_pstates;
+	int num_crtc_pstates;
 
 	struct msm_property_state property_state;
 	struct msm_property_value property_values[CRTC_PROP_COUNT];

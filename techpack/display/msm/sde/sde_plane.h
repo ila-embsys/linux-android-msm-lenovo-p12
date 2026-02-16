@@ -25,6 +25,7 @@
 #include "sde_kms.h"
 #include "sde_hw_mdss.h"
 #include "sde_hw_sspp.h"
+#include "sde_vbif.h"
 
 /* dirty bits for update function */
 #define SDE_PLANE_DIRTY_RECTS	0x1
@@ -40,6 +41,67 @@
 		SDE_PLANE_DIRTY_VIG_IGC | SDE_PLANE_DIRTY_DMA_IGC |\
 		SDE_PLANE_DIRTY_DMA_GC)
 #define SDE_PLANE_DIRTY_ALL	(0xFFFFFFFF & ~(SDE_PLANE_DIRTY_CP))
+
+/*
+ * struct sde_plane - local sde plane structure
+ * @aspace: address space pointer
+ * @csc_cfg: Decoded user configuration for csc
+ * @csc_usr_ptr: Points to csc_cfg if valid user config available
+ * @csc_ptr: Points to sde_csc_cfg structure to use for current
+ * @mplane_list: List of multirect planes of the same pipe
+ * @catalog: Points to sde catalog structure
+ * @revalidate: force revalidation of all the plane properties
+ * @xin_halt_forced_clk: whether or not clocks were forced on for xin halt
+ * @blob_rot_caps: Pointer to rotator capability blob
+ */
+struct sde_plane {
+	struct drm_plane base;
+
+	struct mutex lock;
+
+	enum sde_sspp pipe;
+	enum sde_sspp r_pipe;
+	uint32_t features;      /* capabilities from catalog */
+	uint32_t perf_features; /* perf capabilities from catalog */
+	uint32_t nformats;
+	uint32_t formats[64];
+
+	struct sde_hw_pipe *pipe_hw;
+	struct sde_hw_pipe *r_pipe_hw;
+	struct sde_hw_pipe_cfg pipe_cfg;
+	struct sde_hw_pipe_cfg r_pipe_cfg;
+	struct sde_hw_sharp_cfg sharp_cfg;
+	struct sde_hw_pipe_qos_cfg pipe_qos_cfg;
+	struct sde_vbif_set_qos_params cached_qos_params;
+	uint32_t color_fill;
+	bool is_error;
+	bool is_rt_pipe;
+	bool is_virtual;
+	struct list_head mplane_list;
+	struct sde_mdss_cfg *catalog;
+	bool revalidate;
+	bool xin_halt_forced_clk;
+
+	struct sde_csc_cfg csc_cfg;
+	struct sde_csc_cfg *csc_usr_ptr;
+	struct sde_csc_cfg *csc_ptr;
+
+	uint32_t cached_lut_flag;
+	const struct sde_sspp_sub_blks *pipe_sblk;
+
+	char pipe_name[SDE_NAME_SIZE];
+
+	struct msm_property_info property_info;
+	struct msm_property_data property_data[PLANE_PROP_COUNT];
+	struct drm_property_blob *blob_info;
+	struct drm_property_blob *blob_rot_caps;
+
+	/* debugfs related stuff */
+	struct dentry *debugfs_root;
+	bool debugfs_default_scale;
+};
+
+#define to_sde_plane(x) container_of(x, struct sde_plane, base)
 
 /**
  * enum sde_plane_sclcheck_state - User scaler data status
@@ -307,5 +369,22 @@ void sde_plane_setup_src_split_order(struct drm_plane *plane,
  * Returns: true if sys cache is required, otherwise false.
  */
 bool sde_plane_is_cache_required(struct drm_plane *plane);
+
+/**
+ * sde_plane_get_right_pipe - returns side pipe for source split
+ * @pipe: Main Pipe ID
+ * Returns: side pipe reserved for source split ot none
+*/
+static enum sde_sspp sde_plane_get_right_pipe(enum sde_sspp pipe)
+{
+	switch (pipe) {
+	case SSPP_VIG0:
+		return SSPP_VIG1;
+	case SSPP_VIG2:
+		return SSPP_VIG3;
+	default:
+		return SSPP_NONE;
+	}
+}
 
 #endif /* _SDE_PLANE_H_ */

@@ -42,6 +42,7 @@
 #include "sde_power_handle.h"
 #include "sde_core_perf.h"
 #include "sde_trace.h"
+#include "sde_plane.h"
 
 #define SDE_PSTATES_MAX (SDE_STAGE_MAX * 4)
 #define SDE_MULTIRECT_PLANE_MAX (SDE_STAGE_MAX * 2)
@@ -1183,6 +1184,7 @@ struct plane_state {
 	const struct drm_plane_state *drm_pstate;
 	int stage;
 	u32 pipe_id;
+	struct sde_rect dst_rect;
 };
 
 static int pstate_cmp(const void *a, const void *b)
@@ -1198,7 +1200,7 @@ static int pstate_cmp(const void *a, const void *b)
 	if (pa_zpos != pb_zpos)
 		rc = pa_zpos - pb_zpos;
 	else
-		rc = pa->drm_pstate->crtc_x - pb->drm_pstate->crtc_x;
+		rc = pa->dst_rect.x - pb->dst_rect.x;
 
 	return rc;
 }
@@ -1216,7 +1218,7 @@ static int _sde_crtc_validate_src_split_order(struct drm_crtc *crtc,
 	struct sde_rect left_rect, right_rect;
 	struct sde_kms *sde_kms;
 	int32_t left_pid, right_pid;
-	int32_t stage;
+	int32_t stage = 0;
 	int i, rc = 0;
 
 	sde_kms = _sde_crtc_get_kms(crtc);
@@ -1233,18 +1235,11 @@ static int _sde_crtc_validate_src_split_order(struct drm_crtc *crtc,
 			continue;
 
 		stage = cur_pstate->stage;
+		left_pid = prv_pstate->drm_pstate->plane->base.id;
+		right_pid = cur_pstate->drm_pstate->plane->base.id;
 
-		left_pid = prv_pstate->sde_pstate->base.plane->base.id;
-		POPULATE_RECT(&left_rect, prv_pstate->drm_pstate->crtc_x,
-			prv_pstate->drm_pstate->crtc_y,
-			prv_pstate->drm_pstate->crtc_w,
-			prv_pstate->drm_pstate->crtc_h, false);
-
-		right_pid = cur_pstate->sde_pstate->base.plane->base.id;
-		POPULATE_RECT(&right_rect, cur_pstate->drm_pstate->crtc_x,
-			cur_pstate->drm_pstate->crtc_y,
-			cur_pstate->drm_pstate->crtc_w,
-			cur_pstate->drm_pstate->crtc_h, false);
+		left_rect = prv_pstate->dst_rect;
+		right_rect = cur_pstate->dst_rect;
 
 		if (right_rect.x < left_rect.x) {
 			swap(left_pid, right_pid);
@@ -1260,7 +1255,8 @@ static int _sde_crtc_validate_src_split_order(struct drm_crtc *crtc,
 		 * - planes in source split must have same dest yoff and height
 		 */
 		if ((right_pid < left_pid) &&
-			!sde_kms->catalog->pipe_order_type) {
+			!sde_kms->catalog->pipe_order_type &&
+			(left_pid != right_pid)) {
 			SDE_ERROR(
 			  "invalid src split cfg, stage:%d left:%d right:%d\n",
 				stage, left_pid, right_pid);
@@ -1358,7 +1354,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 {
 	struct drm_plane *plane;
 	struct drm_framebuffer *fb;
-	struct drm_plane_state *state;
+	const struct drm_plane_state *state;
 	struct sde_crtc_state *cstate;
 	struct sde_plane_state *pstate = NULL;
 	struct plane_state *pstates = NULL;
@@ -1366,7 +1362,6 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	struct sde_hw_ctl *ctl;
 	struct sde_hw_mixer *lm;
 	struct sde_hw_stage_cfg *stage_cfg;
-	struct sde_rect plane_crtc_roi;
 	uint32_t stage_idx, lm_idx;
 	int zpos_cnt[SDE_STAGE_MAX + 1] = { 0 };
 	int i, mode, cnt = 0;
@@ -1381,22 +1376,18 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	lm = mixer->hw_lm;
 	stage_cfg = &sde_crtc->stage_cfg;
 	cstate = to_sde_crtc_state(crtc->state);
-	pstates = kcalloc(SDE_PSTATES_MAX,
-			sizeof(struct plane_state), GFP_KERNEL);
+	pstates = cstate->crtc_pstates;
+	cnt = cstate->num_crtc_pstates;
+
 	if (!pstates)
 		return;
 
-	drm_atomic_crtc_for_each_plane(plane, crtc) {
-		state = plane->state;
-		if (!state)
-			continue;
+	_sde_crtc_set_src_split_order(crtc, pstates, cnt);
 
-		plane_crtc_roi.x = state->crtc_x;
-		plane_crtc_roi.y = state->crtc_y;
-		plane_crtc_roi.w = state->crtc_w;
-		plane_crtc_roi.h = state->crtc_h;
-
-		pstate = to_sde_plane_state(state);
+	for (i = 0; i < cnt; i++) {
+		pstate = pstates[i].sde_pstate;
+		state = pstates[i].drm_pstate;
+		plane = state->plane;
 		fb = state->fb;
 
 		mode = sde_plane_get_property(pstate,
@@ -1405,13 +1396,15 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				(mode == SDE_DRM_FB_SEC_DIR_TRANS)) ?
 				true : false;
 
-		sde_plane_ctl_flush(plane, ctl, true);
+		ctl->ops.update_bitmask_sspp(ctl, pstates[i].pipe_id, true);
+		SDE_DEBUG("Flushing pstate #%d...\n", i);
+
 
 		SDE_DEBUG("crtc %d stage:%d - plane %d sspp %d fb %d\n",
 				crtc->base.id,
-				pstate->stage,
+				pstates[i].stage,
 				plane->base.id,
-				sde_plane_pipe(plane) - SSPP_VIG0,
+				pstates[i].pipe_id - SSPP_VIG0,
 				state->fb ? state->fb->base.id : -1);
 
 		format = to_sde_format(msm_framebuffer_format(pstate->base.fb));
@@ -1420,7 +1413,7 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 			goto end;
 		}
 
-		if (pstate->stage == SDE_STAGE_BASE && format->alpha_enable)
+		if (pstates[i].stage == SDE_STAGE_BASE && format->alpha_enable)
 			bg_alpha_enable = true;
 
 		SDE_EVT32(DRMID(crtc), DRMID(plane),
@@ -1431,14 +1424,24 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				state->crtc_w, state->crtc_h,
 				pstate->rotation, is_secure);
 
-		stage_idx = zpos_cnt[pstate->stage]++;
-		stage_cfg->stage[pstate->stage][stage_idx] =
-					sde_plane_pipe(plane);
-		stage_cfg->multirect_index[pstate->stage][stage_idx] =
+		stage_idx = zpos_cnt[pstates[i].stage]++;
+
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			if (pstates[i].pipe_id == to_sde_plane(plane)->pipe)
+				stage_cfg->multirect_index[pstates[i].stage][stage_idx] =
+					SDE_SSPP_RECT_SOLO;
+			else
+				stage_cfg->multirect_index[pstates[i].stage][stage_idx] =
+					SDE_SSPP_RECT_SOLO;
+		} else {
+			stage_cfg->multirect_index[pstates[i].stage][stage_idx] =
 					pstate->multirect_index;
+		}
+		stage_cfg->stage[pstates[i].stage][stage_idx] =
+					pstates[i].pipe_id;
 
 		SDE_EVT32(DRMID(crtc), DRMID(plane), stage_idx,
-			sde_plane_pipe(plane) - SSPP_VIG0, pstate->stage,
+			pstates[i].pipe_id - SSPP_VIG0, pstates[i].stage,
 			pstate->multirect_index, pstate->multirect_mode,
 			format->base.pixel_format, fb ? fb->modifier : 0);
 
@@ -1451,23 +1454,9 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 				mixer[lm_idx].mixer_op_mode = 0;
 			else
 				mixer[lm_idx].mixer_op_mode |=
-						1 << pstate->stage;
+						1 << pstates[i].stage;
 		}
-
-		if (cnt >= SDE_PSTATES_MAX)
-			continue;
-
-		pstates[cnt].sde_pstate = pstate;
-		pstates[cnt].drm_pstate = state;
-		pstates[cnt].stage = sde_plane_get_property(
-				pstates[cnt].sde_pstate, PLANE_PROP_ZPOS);
-		pstates[cnt].pipe_id = sde_plane_pipe(plane);
-
-		cnt++;
 	}
-
-	sort(pstates, cnt, sizeof(pstates[0]), pstate_cmp, NULL);
-	_sde_crtc_set_src_split_order(crtc, pstates, cnt);
 
 	if (lm && lm->ops.setup_dim_layer) {
 		cstate = to_sde_crtc_state(crtc->state);
@@ -1479,7 +1468,8 @@ static void _sde_crtc_blend_setup_mixer(struct drm_crtc *crtc,
 	_sde_crtc_program_lm_output_roi(crtc);
 
 end:
-	kfree(pstates);
+	// kfree(pstates);
+	return;
 }
 
 static void _sde_crtc_swap_mixers_for_right_partial_update(
@@ -3262,6 +3252,7 @@ static void sde_crtc_atomic_flush(struct drm_crtc *crtc,
 	struct sde_crtc_state *cstate;
 	struct sde_kms *sde_kms;
 	int idle_time = 0;
+	int i;
 
 	if (!crtc || !crtc->dev || !crtc->dev->dev_private) {
 		SDE_ERROR("invalid crtc\n");
@@ -3355,10 +3346,24 @@ static void sde_crtc_atomic_flush(struct drm_crtc *crtc,
 	 *                      required writes/flushing before crtc's "flush
 	 *                      everything" call below.
 	 */
-	drm_atomic_crtc_for_each_plane(plane, crtc) {
-		if (sde_kms->smmu_state.transition_error)
-			sde_plane_set_error(plane, true);
-		sde_plane_flush(plane);
+	if (cstate->crtc_pstates && cstate->num_crtc_pstates > 0) {
+		for (i = 0; i < cstate->num_crtc_pstates; i++) {
+			struct plane_state *pstate_entry = &cstate->crtc_pstates[i];
+			const struct drm_plane_state *pstate = pstate_entry->drm_pstate;
+
+			if (!pstate || !pstate->plane)
+				continue;
+
+			if (sde_kms->smmu_state.transition_error)
+				sde_plane_set_error(pstate->plane, true);
+			sde_plane_flush(pstate->plane);
+		}
+	} else {
+		drm_atomic_crtc_for_each_plane(plane, crtc) {
+			if (sde_kms->smmu_state.transition_error)
+				sde_plane_set_error(plane, true);
+			sde_plane_flush(plane);
+		}
 	}
 
 	/* Kickoff will be scheduled by outer layer */
@@ -3394,8 +3399,14 @@ static void sde_crtc_destroy_state(struct drm_crtc *crtc,
 
 	SDE_DEBUG("crtc%d\n", crtc->base.id);
 
-	drm_for_each_encoder_mask(enc, crtc->dev, state->encoder_mask)
-		sde_rm_release(&sde_kms->rm, enc, true);
+	// if (cstate->rsc_client)
+		// sde_rsc_client_put(cstate->rsc_client);
+
+	if (cstate->crtc_pstates) {
+		kfree(cstate->crtc_pstates);
+		cstate->crtc_pstates = NULL;
+		cstate->num_crtc_pstates = 0;
+	}
 
 	__drm_atomic_helper_crtc_destroy_state(state);
 
@@ -4686,7 +4697,6 @@ static int _sde_crtc_check_get_pstates(struct drm_crtc *crtc,
 					pipe_staged[i]->plane->base.id);
 				return -EINVAL;
 			}
-			sde_plane_clear_multirect(pipe_staged[i]);
 		}
 	}
 
@@ -4773,14 +4783,21 @@ static int _sde_crtc_check_zpos(struct drm_crtc_state *state,
 static int _sde_crtc_atomic_check_pstates(struct drm_crtc *crtc,
 		struct drm_crtc_state *state,
 		struct plane_state *pstates,
-		struct sde_multirect_plane_states *multirect_plane)
+		struct sde_multirect_plane_states *multirect_plane,
+		int *cnt)
 {
 	struct sde_crtc *sde_crtc;
 	struct sde_crtc_state *cstate;
 	struct sde_kms *kms;
 	struct drm_plane *plane;
 	struct drm_display_mode *mode;
-	int rc = 0, cnt = 0;
+	int rc = 0;
+	const struct drm_plane_state *plane_state;
+	struct sde_plane_state *pstate;
+	struct sde_plane *psde;
+	int i = 0, zpos;
+
+	*cnt = 0;
 
 	kms = _sde_crtc_get_kms(crtc);
 
@@ -4793,20 +4810,108 @@ static int _sde_crtc_atomic_check_pstates(struct drm_crtc *crtc,
 	cstate = to_sde_crtc_state(state);
 	mode = &state->adjusted_mode;
 
-	/* get plane state for all drm planes associated with crtc state */
-	rc = _sde_crtc_check_get_pstates(crtc, state, mode, pstates,
-			plane, multirect_plane, &cnt);
-	if (rc)
-		return rc;
+	/*
+	 * New logic to get plane states, handles SDE_SSPP_MULTIRECT_PARALLEL
+	 */
+	drm_atomic_crtc_state_for_each_plane_state(plane, plane_state, state) {
+		pstate = to_sde_plane_state(plane_state);
+		psde = to_sde_plane(plane);
+
+		if (pstate->multirect_mode == SDE_SSPP_MULTIRECT_PARALLEL) {
+			struct sde_rect dst_rect;
+
+			if ((*cnt) >= (SDE_PSTATES_MAX - 1)) {
+				rc = -EINVAL;
+				goto end;
+			}
+
+			POPULATE_RECT(&dst_rect, plane_state->crtc_x,
+				plane_state->crtc_y, plane_state->crtc_w,
+				plane_state->crtc_h, false);
+			zpos = sde_plane_get_property(pstate, PLANE_PROP_ZPOS);
+
+			/* left pipe */
+			pstates[*cnt].sde_pstate = pstate;
+			pstates[*cnt].drm_pstate = plane_state;
+			pstates[*cnt].stage = zpos;
+			pstates[*cnt].pipe_id = psde->pipe;
+			pstates[*cnt].dst_rect = dst_rect;
+			pstates[*cnt].dst_rect.w /= 2;
+			(*cnt)++;
+
+			/* right pipe */
+			pstates[*cnt].sde_pstate = pstate;
+			pstates[*cnt].drm_pstate = plane_state;
+			pstates[*cnt].stage = zpos;
+			pstates[*cnt].pipe_id = psde->r_pipe;
+			pstates[*cnt].dst_rect = dst_rect;
+			pstates[*cnt].dst_rect.x += dst_rect.w / 2;
+			pstates[*cnt].dst_rect.w -= dst_rect.w / 2;
+			(*cnt)++;
+		} else {
+			if ((*cnt) >= SDE_PSTATES_MAX) {
+				rc = -EINVAL;
+				goto end;
+			}
+
+			zpos = sde_plane_get_property(pstate, PLANE_PROP_ZPOS);
+			pstates[*cnt].sde_pstate = pstate;
+			pstates[*cnt].drm_pstate = plane_state;
+			pstates[*cnt].stage = zpos;
+			pstates[*cnt].pipe_id = sde_plane_pipe(plane);
+			POPULATE_RECT(&pstates[*cnt].dst_rect,
+				plane_state->crtc_x, plane_state->crtc_y,
+				plane_state->crtc_w, plane_state->crtc_h,
+				false);
+			(*cnt)++;
+		}
+	}
+
+	sort(pstates, *cnt, sizeof(pstates[0]), pstate_cmp, NULL);
+
+	/* Check for L+R multirect case (different from our parallel split) */
+	for (i = 1; i < *cnt; i++) {
+		const struct drm_plane_state *prv_plane_state;
+		const struct drm_plane_state *cur_plane_state;
+		struct sde_plane_state *prv_pstate, *cur_pstate;
+		struct sde_multirect_plane_states mplane_states;
+
+		prv_plane_state = pstates[i - 1].drm_pstate;
+		cur_plane_state = pstates[i].drm_pstate;
+
+		/* Skip intra-plane split check for L+R multirect */
+		if (prv_plane_state->plane == cur_plane_state->plane)
+			continue;
+
+		prv_pstate = pstates[i - 1].sde_pstate;
+		cur_pstate = pstates[i].sde_pstate;
+
+		if ((prv_plane_state->crtc_w != cur_plane_state->crtc_w) ||
+		    (prv_plane_state->crtc_h != cur_plane_state->crtc_h) ||
+		    (prv_plane_state->src_w != cur_plane_state->src_w) ||
+		    (prv_plane_state->src_h != cur_plane_state->src_h))
+			continue;
+
+		mplane_states.r0 = prv_plane_state;
+		mplane_states.r1 = cur_plane_state;
+		if (!sde_plane_validate_multirect_v2(&mplane_states)) {
+			SDE_ERROR("SDE_SSPP_MULTIRECT_L_PLUS_R");
+			// prv_pstate->multirect_mode = SDE_SSPP_MULTIRECT_L_PLUS_R;
+			// prv_pstate->multirect_index = SDE_SSPP_RECT_0;
+			// cur_pstate->multirect_mode = SDE_SSPP_MULTIRECT_L_PLUS_R;
+			// cur_pstate->multirect_index = SDE_SSPP_RECT_1;
+		}
+	}
+
 
 	/* assign mixer stages based on sorted zpos property */
-	rc = _sde_crtc_check_zpos(state, sde_crtc, pstates, cstate, mode, cnt);
+	rc = _sde_crtc_check_zpos(state, sde_crtc, pstates, cstate, mode, *cnt);
 	if (rc)
-		return rc;
+		goto end;
 
-	rc = _sde_crtc_check_secure_state(crtc, state, pstates, cnt);
+	rc = _sde_crtc_check_secure_state(crtc, state, pstates, *cnt);
 	if (rc)
-		return rc;
+		goto end;
 
 	/*
 	 * validate and set source split:
@@ -4814,11 +4919,12 @@ static int _sde_crtc_atomic_check_pstates(struct drm_crtc *crtc,
 	 * we assume that all pipes are in source split so its valid to compare
 	 * without taking into account left/right mixer placement
 	 */
-	rc = _sde_crtc_validate_src_split_order(crtc, pstates, cnt);
+	rc = _sde_crtc_validate_src_split_order(crtc, pstates, *cnt);
 	if (rc)
-		return rc;
+		goto end;
 
-	return 0;
+end:
+	return rc;
 }
 
 static int sde_crtc_atomic_check(struct drm_crtc *crtc,
@@ -4849,14 +4955,14 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 		goto end;
 	}
 
-	pstates = kcalloc(SDE_PSTATES_MAX,
+	cstate->crtc_pstates = kcalloc(SDE_PSTATES_MAX,
 			sizeof(struct plane_state), GFP_KERNEL);
 
 	multirect_plane = kcalloc(SDE_MULTIRECT_PLANE_MAX,
 			sizeof(struct sde_multirect_plane_states),
 			GFP_KERNEL);
 
-	if (!pstates || !multirect_plane) {
+	if (!cstate->crtc_pstates || !multirect_plane) {
 		rc = -ENOMEM;
 		goto end;
 	}
@@ -4889,8 +4995,8 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 	_sde_crtc_setup_is_ppsplit(state);
 	_sde_crtc_setup_lm_bounds(crtc, state);
 
-	rc = _sde_crtc_atomic_check_pstates(crtc, state, pstates,
-			multirect_plane);
+	rc = _sde_crtc_atomic_check_pstates(crtc, state, cstate->crtc_pstates,
+			multirect_plane, &cstate->num_crtc_pstates);
 	if (rc) {
 		SDE_ERROR("crtc%d failed pstate check %d\n", crtc->base.id, rc);
 		goto end;
@@ -4916,8 +5022,12 @@ static int sde_crtc_atomic_check(struct drm_crtc *crtc,
 		goto end;
 	}
 end:
-	kfree(pstates);
 	kfree(multirect_plane);
+	if (rc && cstate->crtc_pstates) {
+		kfree(cstate->crtc_pstates);
+		cstate->crtc_pstates = NULL;
+		cstate->num_crtc_pstates = 0;
+	}
 	return rc;
 }
 
