@@ -429,11 +429,11 @@ static void sde_encoder_phys_vid_setup_timing_engine(
 
 	vid_enc->timing_params = timing_params;
 
-	if (phys_enc->cont_splash_enabled) {
-		SDE_DEBUG_VIDENC(vid_enc,
-			"skipping intf programming since cont splash is enabled\n");
-		goto exit;
-	}
+	// if (phys_enc->cont_splash_enabled) {
+	// 	SDE_DEBUG_VIDENC(vid_enc,
+	// 		"skipping intf programming since cont splash is enabled\n");
+	// 	goto exit;
+	// }
 
 	fmt = sde_get_sde_format(fmt_fourcc);
 	SDE_DEBUG_VIDENC(vid_enc, "fmt_fourcc 0x%X\n", fmt_fourcc);
@@ -776,9 +776,11 @@ static void sde_encoder_phys_vid_enable(struct sde_encoder_phys *phys_enc)
 	if (WARN_ON(!phys_enc->hw_intf->ops.enable_timing))
 		return;
 
-	if (!phys_enc->cont_splash_enabled)
-		sde_encoder_helper_split_config(phys_enc,
-				phys_enc->hw_intf->idx);
+	if (!phys_enc->cont_splash_enabled) {
+		SDE_ERROR("'sde_encoder_helper_split_config' will be called despite 'cont_splash_enabled'\n");
+	}
+	sde_encoder_helper_split_config(phys_enc,
+			phys_enc->hw_intf->idx);
 
 	sde_encoder_phys_vid_setup_timing_engine(phys_enc);
 
@@ -798,11 +800,11 @@ static void sde_encoder_phys_vid_enable(struct sde_encoder_phys *phys_enc)
 	 * skip flushing intf during cont. splash handoff since bootloader
 	 * has already enabled the hardware and is single buffered.
 	 */
-	if (phys_enc->cont_splash_enabled) {
-		SDE_DEBUG_VIDENC(vid_enc,
-		"skipping intf flush bit set as cont. splash is enabled\n");
-		goto skip_flush;
-	}
+	// if (phys_enc->cont_splash_enabled) {
+	// 	SDE_DEBUG_VIDENC(vid_enc,
+	// 	"skipping intf flush bit set as cont. splash is enabled\n");
+	// 	goto skip_flush;
+	// }
 
 	ctl->ops.update_bitmask_intf(ctl, intf->idx, 1);
 

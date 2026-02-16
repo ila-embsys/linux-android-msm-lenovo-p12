@@ -730,7 +730,7 @@ static int _sde_kms_release_splash_buffer(struct sde_kms *sde_kms,
 					unsigned int ramdump_base,
 					unsigned int ramdump_buffer_size)
 {
-	unsigned long pfn_start, pfn_end, pfn_idx;
+	// unsigned long pfn_start, pfn_end, pfn_idx;
 	int ret = 0;
 	struct sde_boot_config *boot_cfg = sde_kms->imem;
 
@@ -738,6 +738,8 @@ static int _sde_kms_release_splash_buffer(struct sde_kms *sde_kms,
 		SDE_ERROR("invalid params\n");
 		return -EINVAL;
 	}
+
+	SDE_DEBUG("Releasing splash buffer...");
 
 	/* leave ramdump memory only if base address matches */
 	if (ramdump_base == mem_addr &&
@@ -749,16 +751,22 @@ static int _sde_kms_release_splash_buffer(struct sde_kms *sde_kms,
 	if (!ramdump_base)
 		_sde_clear_boot_config(boot_cfg);
 
-	pfn_start = mem_addr >> PAGE_SHIFT;
-	pfn_end = (mem_addr + splash_buffer_size) >> PAGE_SHIFT;
+	// pfn_start = mem_addr >> PAGE_SHIFT;
+	// pfn_end = (mem_addr + splash_buffer_size) >> PAGE_SHIFT;
 
-	ret = memblock_free(mem_addr, splash_buffer_size);
-	if (ret) {
-		SDE_ERROR("continuous splash memory free failed:%d\n", ret);
-		return ret;
-	}
-	for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++)
-		free_reserved_page(pfn_to_page(pfn_idx));
+	//
+    // ret = memblock_free(mem_addr, splash_buffer_size); 
+
+	// if (ret) {
+	// 	SDE_ERROR("continuous splash memory free failed:%d\n", ret);
+	// 	return ret;
+	// }
+
+	SDE_ERROR("Skipping free_reserved_page for splash pages.");
+	// for (pfn_idx = pfn_start; pfn_idx < pfn_end; pfn_idx++) {
+	// 	SDE_DEBUG("freeing reserved page pfn:%d\n", ret);
+	// 	free_reserved_page(pfn_to_page(pfn_idx));
+	// }
 
 	return ret;
 
