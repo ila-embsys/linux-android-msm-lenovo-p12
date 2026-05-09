@@ -1,0 +1,1251 @@
+/dts-v1/;
+
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+#include "sm8250.dtsi"
+#include "pm8150.dtsi"
+
+/ {
+	chassis-type = "tablet";
+
+	model = "Lenovo Xiaoxin Pad Pro 12.7 TB371FC";
+	compatible = "lenovo,tb371fc", "qcom,sm8250";
+	qcom,board-id = <0 0>;
+
+	vph_pwr: vph-pwr-regulator {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+	};
+
+	vreg_s4a_1p8: pm8150-s4 {
+		compatible = "regulator-fixed";
+		regulator-name = "vreg_s4a_1p8";
+
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+
+		regulator-always-on;
+		regulator-boot-on;
+
+		vin-supply = <&vph_pwr>;
+	};
+};
+
+&soc {
+	/* What the driver uses it? */
+	sim: simtray {
+		compatible = "Lenovo,simtray-status";
+		cd-gpios = <&tlmm 14 GPIO_ACTIVE_HIGH>;
+	};
+
+	/*
+	 * This node must be related to the `drivers/soc/qcom/serial_num.c`,
+	 * though it's missing and likely will not work at all.
+	 */
+	sn_fuse: snfuse@786134 {
+		compatible = "qcom,sn-fuse";
+		reg = <0x786134 0x4>;
+		reg-names = "sn-base";
+	};
+
+	/*
+	 * `IPA` (IP Accelerator) is missing in `sm8250.dtsi`.
+	 * The vendor disabled it in 4.19 kernel, but it is already not found
+	 * in base dtsi.
+	 * So, comment out and skip this node.
+	 */
+
+	// qcom,rmnet-ipa {
+	// 	status = "disabled";
+	// };
+
+	/*
+	 * `SLIMbus` (Serial Low-power Inter-chip Media Bus) is missing
+	 * in `sm8250.dtsi`.
+	 * Originally in 4.19 kernel, `huaqin,hardware_info` uses this node:
+	 *
+	 * ```
+	 * &slim_aud {
+	 *	hwinfo: HardwareInfo {
+	 *		compatible = "huaqin,hardware_info";
+	 *		status = "okay";
+	 *	};
+	 * };
+	 * ```
+	 *
+	 * But it is not included into `sm8250.dtsi`.
+	 * Should it be added manually like below?
+	 */
+
+	// slim: slim-ngd@3ac0000 {
+	// 	compatible = "qcom,slim-ngd-v1.5.0";
+	// 	reg = <0 0x03ac0000 0 0x2c000>;
+	// 	interrupts = <GIC_SPI 163 IRQ_TYPE_LEVEL_HIGH>;
+	// 	dmas = <&slimbam 3>, <&slimbam 4>;
+	// 	dma-names = "rx", "tx";
+	// 	iommus = <&apps_smmu 0x1826 0x0>;
+	// 	#address-cells = <1>;
+	// 	#size-cells = <0>;
+	// 	status = "disabled";
+
+	// 	hwinfo: HardwareInfo {
+	// 		compatible = "huaqin,hardware_info";
+	// 		status = "okay";
+	// 	};
+	// };
+};
+
+/*
+ * `SDX55M` (High-Performance 5G Modem-RF System)
+ *
+ * Originally `mdm0` is defined in base `kona.dtsi` in 4.19 kernel
+ * like below:
+ *
+ * ```
+ * mdm0: qcom,mdm0 {
+ * 	compatible = "qcom,ext-sdx55m";
+ * 	...
+ * };
+ * ```
+ *
+ * It was disabled by vendor in 4.19 kernel, but it is already not found
+ * in base `sm8250.dtsi`. So, likely it is not used at all
+ * and nothing to do with it.
+ */
+
+// &mdm0 {
+// 	status = "disabled";
+// };
+
+/*
+ * START: ----------------------- PMIC regulators ------------------------------
+ *
+ * Original nodes from `tb371fc`:
+ *
+ *```
+ * &apps_rsc {
+ * 	rpmh-regulator-ldoc8 {
+ * 		status = "ok";
+ * 	};
+ * 
+ * 	rpmh-regulator-ldoc10 {
+ * 		status = "ok";
+ * 	};
+ * };
+ * 
+ * &pm8150a_l1 {
+ * 	regulator-always-on;
+ * 	status = "ok";
+ * };
+ * 
+ * &pm8150a_l8 {
+ * 	regulator-always-on;
+ * 	status = "ok";
+ * };
+ *```
+ *
+ * Note: original values from `kona-regulators.dtsi` in 4.19 kernel:
+ * ```
+ *   regulator-min-microvolt = <3000000>;
+ *   regulator-max-microvolt = <3312000>;
+ *   qcom,init-voltage = <3000000>;
+ * ```
+ *
+ * So, the vendor increased the voltage from 3.0V to 3.312V for some unknown reason.
+ */
+
+// &pm8150a_l10 {
+// 	qcom,init-mode = <RPMH_REGULATOR_MODE_HPM>;
+// 	qcom,init-voltage = <3312000>;
+// 	regulator-always-on;
+// 	regulator-max-microvolt = <3312000>;
+// 	regulator-min-microvolt = <3312000>;
+// 	status = "ok";
+// };
+
+/*
+ * To describe the same changes using the newer kernel's way,
+ * we should look at the original structure of `kona-regulators.dtsi`
+ * from 4.19 kernel first:
+ *
+ * ```
+ * &apps_rsc {
+ * 	rpmh-regulator-ldoc8 {
+ * 		qcom,resource-name = "ldoc8";
+ * 		qcom,regulator-type = "pmic5-ldo";
+ * 		L8C: pm8150a_l8: regulator-pm8150a-l8 {
+ * 			regulator-name = "pm8150a_l8";
+ * 			qcom,set = <RPMH_REGULATOR_SET_ALL>;
+ * 			regulator-min-microvolt = <1800000>;
+ * 			regulator-max-microvolt = <1800000>;
+ * 			qcom,init-voltage = <1800000>;
+ * 		};
+ * 	};
+ * };
+ * ```
+ *
+ * In the newer kernels quite likely the alternative must be looking like:
+ * ```
+ * &apps_rsc {
+ *     regulators-0 {
+ *         compatible = "qcom,pm8150-rpmh-regulators";
+ *         qcom,pmic-id = "a";
+ *     };
+ * };
+ * ```
+ */
+
+&apps_rsc {
+	regulators-0 {
+		compatible = "qcom,pm8150-rpmh-regulators";
+		qcom,pmic-id = "a";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+		vdd-s9-supply = <&vph_pwr>;
+		vdd-s10-supply = <&vph_pwr>;
+
+		vdd-l2-l10-supply = <&vreg_bob>;
+
+		/* 
+		 * LDO10 was 3.0V in base, 3.312V in vendor.
+		 * Porting it exactly as vendor used.
+		 */
+		vreg_l10a_3p3: ldo10 {
+			regulator-name = "vreg_l10a_3p3";
+			regulator-min-microvolt = <3312000>;
+			regulator-max-microvolt = <3312000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
+	};
+
+	regulators-1 {
+		compatible = "qcom,pm8150l-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vdd-s1-supply = <&vph_pwr>;
+		vdd-s2-supply = <&vph_pwr>;
+		vdd-s3-supply = <&vph_pwr>;
+		vdd-s4-supply = <&vph_pwr>;
+		vdd-s5-supply = <&vph_pwr>;
+		vdd-s6-supply = <&vph_pwr>;
+		vdd-s7-supply = <&vph_pwr>;
+		vdd-s8-supply = <&vph_pwr>;
+
+		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
+
+		vdd-bob-supply = <&vph_pwr>;
+
+		vreg_bob: bob {
+			regulator-name = "vreg_bob";
+			regulator-min-microvolt = <3008000>;
+			regulator-max-microvolt = <3960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
+		};
+
+		/* Porting LDO1 and LDO8 which were marked always-on */
+		vreg_l1a_1p8: ldo1 {
+			regulator-name = "vreg_l1a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
+
+		vreg_l8a_1p8: ldo8 {
+			regulator-name = "vreg_l8a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+			regulator-always-on;
+		};
+	};
+};
+
+/*
+ * END: ------------------------ PMIC regulators -------------------------------
+ */
+
+/*
+ * START: ---------------- QCA6390 (Wi-Fi 6 and Bluetooth 5.1) -----------------
+ *
+ * Originally defined in `kona.dtsi` in 4.19 kernel:
+ *
+ * ```
+ * 	wlan: qcom,cnss-qca6390@b0000000 {
+ * 		compatible = "qcom,cnss-qca6390";
+ * 		...
+ * 	};
+ * ```
+ *
+ * But since `wlan` is not included in `sm8250.dtsi`, nothing can be
+ * referenced in that way.
+ * 
+ */
+
+// &wlan {
+// 	vdd-wlan-dig-supply = <&pm8150_s6>;
+// };
+
+/*
+ * END: ----------------- QCA6390 (Wi-Fi 6 and Bluetooth 5.1) ------------------
+ */
+
+/* 
+ * START: ------------------------ PCIE1 wakeup-pin ----------------------------
+ *
+ * The original `tb371fc` nodes:
+ *
+ * ```
+ * &pcie1 {
+ * 	wake-gpio = <&tlmm 81 GPIO_ACTIVE_HIGH>;
+ * };
+ *
+ * &pcie1_wake_default {
+ * 	config {
+ * 		/delete-property/ bias-pull-up;
+ * 		pins = "gpio81";
+ * 		bias-disable;
+ * 	};
+ *
+ * 	mux {
+ * 		pins = "gpio81";
+ * 	};
+ * };
+ * ```
+ *
+ * As for the pcie1 pins, can be seen that vendor had changed the pins
+ * to `gpio81`.
+ *
+ * The original `kona` pcie1 nodes are next:
+ *
+ * ``` qcom/kona-pinctrl.dtsi
+ *
+ * pcie1_wake_default: pcie1_wake_default {
+ * 	mux {
+ * 		pins = "gpio84";
+ * 		function = "gpio";
+ * 	};
+ *
+ * 	config {
+ * 		pins = "gpio84";
+ * 		drive-strength = <2>;
+ * 		bias-pull-up;
+ * 	};
+ * };
+ * ```
+ * 
+ * ``` qcom/kona-pcie.dtsi
+ *
+ * 	pcie1: qcom,pcie@1c08000 {
+ * 		compatible = "qcom,pci-msm";
+ * 		...
+ * 		wake-gpio = <&tlmm 84 0>;
+ * 	};
+ * ```
+ *
+ * Can be clearly seen that vendor had changed the pins from `gpio84` to `gpio81`.
+ *
+ * So, making the same as vendor's modification:
+ */
+
+&pcie1 {
+	wake-gpio = <&tlmm 81 GPIO_ACTIVE_HIGH>;
+};
+
+&pcie1_default_state {
+
+	/*
+	 * Actually, `tb371fc` released the original `gpio84` here, 
+	 * for using with CTN73x (NFC Wireless Charging Transmitter)
+	 * and re-using `gpio81` from `pcie0` for `pcie1`
+	 */
+
+	wake-pins {
+		pins = "gpio81";
+		/delete-property/ bias-pull-up;
+		bias-disable;
+	};
+};
+
+/*
+ * As the conclusion, the vendor changed the pcie1 wakeup pin configuration
+ * from `gpio84` to `gpio81` and make the `bias-pull-up` to `bias-disable`.
+ *
+ * Note, that the original `gpio81` is using for pcie0 wake up.
+ *
+ * END: ------------------------- PCIE1 wakeup-pin -----------------------------
+ */
+
+/*
+ * Kept the original `pcie2` disable,
+ * though it is already disabled by default in the `sm8250.dtsi`.
+ */
+
+&pcie2 {
+	status = "disabled";
+};
+
+/*
+ * START: ----------------- TLMM (Top Level Mode Multiplexer) ------------------
+ */
+
+&tlmm {
+	/*
+	 * The `pmx_sde` node in original `tb371fc` DTS was coming
+	 * from `kona-pinctrl.dtsi` which used to setup
+	 * `sde_dsi_active` / `sde_dsi_suspend` and
+	 * `sde_dsi1_active` / `sde_dsi1_suspend`.
+	 *
+	 * Those nodes were occupying the `gpio75`, `gpio60`, and `gpio128`.
+	 *
+	 * And the vendor disabled it in their `tb371fc.dts`.
+	 *
+	 * ```
+	 * /delete-node/ pmx_sde;
+	 * ```
+	 *
+	 * At least the `gpio60` in the `qcom/kona-pinctrl.dtsi` in 4.19
+	 * kernel is using for `sde_dsi` as well as `spi11/i2c11`.
+	 * So, probably `sde_dsi` pins were freed for `spi11/i2c11`.
+	 *
+	 * Since the `sm8250.dtsi` uses `gpio60` only for spi11/i2c11, 
+	 * probably it is no need to make any changes.
+	 */
+
+	/* 
+	 * The next additions need to be converted.
+	 *
+	 * ```
+	 * pmx_sde_bl {
+	 *	sde_bl_active: sde_bl_active {
+	 *		config {
+	 *			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+	 *			drive-strength = <2>;   // 2 mA //
+	 *			bias-pull-down;
+	 *			output-high;
+	 *		};
+	 *
+	 *		mux {
+	 *			function = "gpio";
+	 *			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+	 *		};
+	 *	};
+	 *
+	 *	sde_bl_suspend: sde_bl_suspend {
+	 *		config {
+	 *			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+	 *			drive-strength = <2>;   // 2 mA //
+	 *			bias-pull-down;
+	 *			output-low;
+	 *		};
+	 *
+	 *		mux {
+	 *			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+	 *			function = "gpio";
+	 *		};
+	 *	};
+	 * };
+	 *
+	 * nfc {
+	 *	ctn730_int_default: ctn730_int_default {
+	 *		config {
+	 *			pins = "gpio84";
+	 *			drive-strength = <2>;   // 2 mA //
+	 *			bias-disable;
+	 *			input-enable;
+	 *		};
+	 *		
+	 *		mux {
+	 *			pins = "gpio84";
+	 *			function = "gpio";
+	 *		};
+	 *	};
+	 * };
+	 * ```
+	 */
+
+	/*
+	 * Is `pmx_sde_bl` related to backlight?
+	 *
+	 * Note that `gpio78` is stolen from `cam2_default/rst-pins`.
+	 */
+	pmx_sde_bl {
+		sde_bl_active: sde_bl_active {
+			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+			function = "gpio";
+			drive-strength = <2>;   // 2 mA //
+			bias-pull-down;
+			output-high;
+		};
+
+		sde_bl_suspend: sde_bl_suspend {
+			pins = "gpio33", "gpio54", "gpio77", "gpio78";
+			function = "gpio";
+			drive-strength = <2>;   // 2 mA //
+			bias-pull-down;
+			output-low;
+		};
+	};
+
+	/*
+	 * CTN730 (NFC Wireless Charging Transmitter)
+	 * The pin `gpio84` is stolen from `pcie1`
+	 */
+	nfc {
+		ctn730_int_default: ctn730_int_default {
+			pins = "gpio84";
+			function = "gpio";
+			drive-strength = <2>;   // 2 mA //
+			bias-disable;
+			input-enable;
+		};
+	};
+
+	/* 
+	 * In original `tb371fc` references `storage_cd` with only
+	 * change of `pins` to `gpio14`.
+	 * Since `sm8250.dtsi` has lack of such node, define it here fully.
+	 */
+	storage_cd {
+		pins = "gpio14";
+		function = "gpio";
+		drive-strength = <2>;   // 2 mA //
+		bias-pull-up;
+	};
+
+	/* 
+	 * In original `tb371fc`, NFC related nodes below were
+	 * referenced, but since in `sm8250.dtsi` they are not
+	 * defined, so define them here fully.
+	 */
+
+	nfc_enable_active: nfc_enable_active {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;   // 2 mA //
+		bias-pull-up;
+	};
+
+	nfc_enable_suspend: nfc_enable_suspend {
+		pins = "gpio25";
+		function = "gpio";
+		drive-strength = <2>;   // 2 mA //
+		bias-disable;
+	};
+
+	/*
+	 * Note that the pin `gpio84` is stolen from `pcie1`.
+	 */
+	nfc_clk_req_active: nfc_clk_req_active {
+		pins = "gpio84";
+		function = "gpio";
+		drive-strength = <2>;   // 2 mA //
+		bias-pull-up;
+	};
+
+	/*
+	 * Note that the pin `gpio84` is stolen from `pcie1`.
+	 */
+	nfc_clk_req_suspend: nfc_clk_req_suspend {
+		pins = "gpio84";
+		function = "gpio";
+		drive-strength = <2>;   // 2 mA //
+		bias-disable;
+	};
+};
+
+/*
+ * The nodes
+ * - `cam_sensor_active_rst2`
+ * - `cam_sensor_suspend_rst2`
+ * - `cam_sensor_active_rgbleft`
+ * - `cam_sensor_suspend_rgbleft`
+ * were using `gpio78` in the `qcom/kona-pinctrl.dtsi` of 4.19 kernel,
+ * but vendor changed them to `gpio93` in their `tb371fc.dts`.
+ *
+ * ```
+ *	 &cam_sensor_active_rst2 {
+ *	 	config {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 
+ *	 	mux {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 };
+ *	 &cam_sensor_suspend_rst2 {
+ *	 	config {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 
+ *	 	mux {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 };
+ *	 
+ *	 &cam_sensor_active_rgbleft {
+ *	 	config {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 
+ *	 	mux {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 };
+ *	 
+ *	 &cam_sensor_suspend_rgbleft {
+ *	 	config {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 
+ *	 	mux {
+ *	 		pins = "gpio93";
+ *	 	};
+ *	 };
+ * ```
+ *
+ * In `sm8250.dtsi`, the nodes using `gpio78` are
+ * `cam2_default` and `cam2_suspend`, so change exact only them
+ */
+
+&cam2_default {
+	rst-pins {
+		pins = "gpio93";
+	};
+};
+
+&cam2_suspend {
+	rst-pins {
+		pins = "gpio93";
+	};
+};
+
+/*
+ * END: ----------------- TLMM (Top Level Mode Multiplexer) --------------------
+ */
+
+/*
+ * What the alternative for setting `qmp-phy-init-seq`?
+ */
+
+// &usb_1_qmpphy {
+// 	qcom,qmp-phy-init-seq = /* <reg_offset, value, delay> */
+// 				<USB3_DP_QSERDES_COM_SSC_EN_CENTER 0x01 0
+// 				 USB3_DP_QSERDES_COM_SSC_PER1 0x31 0
+// 				 USB3_DP_QSERDES_COM_SSC_PER2 0x01 0
+// 				 USB3_DP_QSERDES_COM_SSC_STEP_SIZE1_MODE0 0xDE 0
+// 				 USB3_DP_QSERDES_COM_SSC_STEP_SIZE2_MODE0 0x07 0
+// 				 USB3_DP_QSERDES_COM_SSC_STEP_SIZE1_MODE1 0xDE 0
+// 				 USB3_DP_QSERDES_COM_SSC_STEP_SIZE2_MODE1 0x07 0
+// 				 USB3_DP_QSERDES_COM_SYSCLK_BUF_ENABLE 0x0A 0
+// 				 USB3_DP_QSERDES_COM_CMN_IPTRIM 0x20 0
+// 				 USB3_DP_QSERDES_COM_CP_CTRL_MODE0 0x06 0
+// 				 USB3_DP_QSERDES_COM_CP_CTRL_MODE1 0x06 0
+// 				 USB3_DP_QSERDES_COM_PLL_RCTRL_MODE0 0x16 0
+// 				 USB3_DP_QSERDES_COM_PLL_RCTRL_MODE1 0x16 0
+// 				 USB3_DP_QSERDES_COM_PLL_CCTRL_MODE0 0x36 0
+// 				 USB3_DP_QSERDES_COM_PLL_CCTRL_MODE1 0x36 0
+// 				 USB3_DP_QSERDES_COM_SYSCLK_EN_SEL 0x1A 0
+// 				 USB3_DP_QSERDES_COM_LOCK_CMP_EN 0x04 0
+// 				 USB3_DP_QSERDES_COM_LOCK_CMP1_MODE0 0x14 0
+// 				 USB3_DP_QSERDES_COM_LOCK_CMP2_MODE0 0x34 0
+// 				 USB3_DP_QSERDES_COM_LOCK_CMP1_MODE1 0x34 0
+// 				 USB3_DP_QSERDES_COM_LOCK_CMP2_MODE1 0x82 0
+// 				 USB3_DP_QSERDES_COM_DEC_START_MODE0 0x82 0
+// 				 USB3_DP_QSERDES_COM_DEC_START_MODE1 0x82 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START1_MODE0 0xAB 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START2_MODE0 0xEA 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START3_MODE0 0x02 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START1_MODE1 0xAB 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START2_MODE1 0xEA 0
+// 				 USB3_DP_QSERDES_COM_DIV_FRAC_START3_MODE1 0x02 0
+// 				 USB3_DP_QSERDES_COM_VCO_TUNE_MAP 0x02 0
+// 				 USB3_DP_QSERDES_COM_VCO_TUNE1_MODE0 0x24 0
+// 				 USB3_DP_QSERDES_COM_VCO_TUNE1_MODE1 0x24 0
+// 				 USB3_DP_QSERDES_COM_VCO_TUNE2_MODE1 0x02 0
+// 				 USB3_DP_QSERDES_COM_HSCLK_SEL 0x01 0
+// 				 USB3_DP_QSERDES_COM_CORECLK_DIV_MODE1 0x08 0
+// 				 USB3_DP_QSERDES_COM_BIN_VCOCAL_CMP_CODE1_MODE0 0xCA 0
+// 				 USB3_DP_QSERDES_COM_BIN_VCOCAL_CMP_CODE2_MODE0 0x1E 0
+// 				 USB3_DP_QSERDES_COM_BIN_VCOCAL_CMP_CODE1_MODE1 0xCA 0
+// 				 USB3_DP_QSERDES_COM_BIN_VCOCAL_CMP_CODE2_MODE1 0x1E 0
+// 				 USB3_DP_QSERDES_COM_BIN_VCOCAL_HSCLK_SEL 0x11 0
+// 				 USB3_DP_QSERDES_TXA_RES_CODE_LANE_TX 0x60 0
+// 				 USB3_DP_QSERDES_TXA_RES_CODE_LANE_RX 0x60 0
+// 				 USB3_DP_QSERDES_TXA_RES_CODE_LANE_OFFSET_TX 0x11 0
+// 				 USB3_DP_QSERDES_TXA_RES_CODE_LANE_OFFSET_RX 0x02 0
+// 				 USB3_DP_QSERDES_TXA_TX_DRV_LVL 0x3f 0x0  /* added */
+// 				 USB3_DP_QSERDES_TXA_TX_EMP_POST1_LVL 0x37 0x0  /* added */
+// 				 USB3_DP_QSERDES_TXA_LANE_MODE_1 0xD5 0
+// 				 USB3_DP_QSERDES_TXA_LANE_MODE_2 0x00 0
+// 				 USB3_DP_QSERDES_TXA_RCV_DETECT_LVL_2 0x12 0
+// 				 USB3_DP_QSERDES_TXA_PI_QEC_CTRL 0x40 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_FO_GAIN 0x09 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SO_GAIN 0x05 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_FASTLOCK_FO_GAIN 0x2F 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SO_SATURATION_AND_ENABLE 0x7F 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_FASTLOCK_COUNT_LOW 0xFF 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_FASTLOCK_COUNT_HIGH 0x0F 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_PI_CONTROLS 0x99 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SB2_THRESH1 0x08 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SB2_THRESH2 0x08 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SB2_GAIN1 0x00 0
+// 				 USB3_DP_QSERDES_RXA_UCDR_SB2_GAIN2 0x04 0
+// 				 USB3_DP_QSERDES_RXA_VGA_CAL_CNTRL1 0x54 0
+// 				 USB3_DP_QSERDES_RXA_VGA_CAL_CNTRL2 0x0C 0
+// 				 USB3_DP_QSERDES_RXA_RX_EQU_ADAPTOR_CNTRL2 0x0F 0
+// 				 USB3_DP_QSERDES_RXA_RX_EQU_ADAPTOR_CNTRL3 0x4A 0
+// 				 USB3_DP_QSERDES_RXA_RX_EQU_ADAPTOR_CNTRL4 0x0A 0
+// 				 USB3_DP_QSERDES_RXA_RX_IDAC_TSETTLE_LOW 0xC0 0
+// 				 USB3_DP_QSERDES_RXA_RX_IDAC_TSETTLE_HIGH 0x00 0
+// 				 USB3_DP_QSERDES_RXA_RX_EQ_OFFSET_ADAPTOR_CNTRL1 0x77 0
+// 				 USB3_DP_QSERDES_RXA_SIGDET_CNTRL 0x04 0
+// 				 USB3_DP_QSERDES_RXA_SIGDET_DEGLITCH_CNTRL 0x0E 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_00_LOW 0xFF 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_00_HIGH 0x7F 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_00_HIGH2 0x7F 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_00_HIGH3 0x7F 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_00_HIGH4 0x97 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_01_LOW 0xDC 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_01_HIGH 0xDC 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_01_HIGH2 0x5C 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_01_HIGH3 0x7B 0
+// 				 USB3_DP_QSERDES_RXA_RX_MODE_01_HIGH4 0xB4 0
+// 				 USB3_DP_QSERDES_RXA_DFE_EN_TIMER 0x04 0
+// 				 USB3_DP_QSERDES_RXA_DFE_CTLE_POST_CAL_OFFSET 0x38 0
+// 				 USB3_DP_QSERDES_RXA_AUX_DATA_TCOARSE_TFINE 0xA0 0
+// 				 USB3_DP_QSERDES_RXA_DCC_CTRL1 0x0C 0
+// 				 USB3_DP_QSERDES_RXA_GM_CAL 0x1F 0
+// 				 USB3_DP_QSERDES_RXA_VTH_CODE 0x10 0
+// 				 USB3_DP_QSERDES_TXB_RES_CODE_LANE_TX 0x60 0
+// 				 USB3_DP_QSERDES_TXB_RES_CODE_LANE_RX 0x60 0
+// 				 USB3_DP_QSERDES_TXB_RES_CODE_LANE_OFFSET_TX 0x11 0
+// 				 USB3_DP_QSERDES_TXB_RES_CODE_LANE_OFFSET_RX 0x02 0
+// 				 USB3_DP_QSERDES_TXB_TX_DRV_LVL 0x3f 0x0 /* added */
+// 				 USB3_DP_QSERDES_TXB_TX_EMP_POST1_LVL 0x37 0x0 /* added */
+// 				 USB3_DP_QSERDES_TXB_LANE_MODE_1 0xD5 0
+// 				 USB3_DP_QSERDES_TXB_LANE_MODE_2 0x00 0
+// 				 USB3_DP_QSERDES_TXB_RCV_DETECT_LVL_2 0x12 0
+// 				 USB3_DP_QSERDES_TXB_PI_QEC_CTRL 0x54 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_FO_GAIN 0x09 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SO_GAIN 0x05 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_FASTLOCK_FO_GAIN 0x2F 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SO_SATURATION_AND_ENABLE 0x7F 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_FASTLOCK_COUNT_LOW 0xFF 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_FASTLOCK_COUNT_HIGH 0x0F 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_PI_CONTROLS 0x99 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SB2_THRESH1 0x08 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SB2_THRESH2 0x08 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SB2_GAIN1 0x00 0
+// 				 USB3_DP_QSERDES_RXB_UCDR_SB2_GAIN2 0x04 0
+// 				 USB3_DP_QSERDES_RXB_VGA_CAL_CNTRL1 0x54 0
+// 				 USB3_DP_QSERDES_RXB_VGA_CAL_CNTRL2 0x0C 0
+// 				 USB3_DP_QSERDES_RXB_RX_EQU_ADAPTOR_CNTRL2 0x0F 0
+// 				 USB3_DP_QSERDES_RXB_RX_EQU_ADAPTOR_CNTRL3 0x4A 0
+// 				 USB3_DP_QSERDES_RXB_RX_EQU_ADAPTOR_CNTRL4 0x0A 0
+// 				 USB3_DP_QSERDES_RXB_RX_IDAC_TSETTLE_LOW 0xC0 0
+// 				 USB3_DP_QSERDES_RXB_RX_IDAC_TSETTLE_HIGH 0x00 0
+// 				 USB3_DP_QSERDES_RXB_RX_EQ_OFFSET_ADAPTOR_CNTRL1 0x77 0
+// 				 USB3_DP_QSERDES_RXB_SIGDET_CNTRL 0x04 0
+// 				 USB3_DP_QSERDES_RXB_SIGDET_DEGLITCH_CNTRL 0x0E 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_00_LOW 0x7F 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_00_HIGH 0xFF 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_00_HIGH2 0x3F 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_00_HIGH3 0x7F 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_00_HIGH4 0xA6 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_01_LOW 0xDC 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_01_HIGH 0xDC 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_01_HIGH2 0x5C 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_01_HIGH3 0x7B 0
+// 				 USB3_DP_QSERDES_RXB_RX_MODE_01_HIGH4 0xB4 0
+// 				 USB3_DP_QSERDES_RXB_DFE_EN_TIMER 0x04 0
+// 				 USB3_DP_QSERDES_RXB_DFE_CTLE_POST_CAL_OFFSET 0x38 0
+// 				 USB3_DP_QSERDES_RXB_AUX_DATA_TCOARSE_TFINE 0xA0 0
+// 				 USB3_DP_QSERDES_RXB_DCC_CTRL1 0x0C 0
+// 				 USB3_DP_QSERDES_RXB_GM_CAL 0x1F 0
+// 				 USB3_DP_QSERDES_RXB_VTH_CODE 0x10 0
+// 				 USB3_DP_PCS_LOCK_DETECT_CONFIG1 0xD0 0
+// 				 USB3_DP_PCS_LOCK_DETECT_CONFIG2 0x07 0
+// 				 USB3_DP_PCS_LOCK_DETECT_CONFIG3 0x20 0
+// 				 USB3_DP_PCS_LOCK_DETECT_CONFIG6 0x13 0
+// 				 USB3_DP_PCS_REFGEN_REQ_CONFIG1 0x21 0
+// 				 USB3_DP_PCS_RX_SIGDET_LVL 0xA9 0
+// 				 USB3_DP_PCS_CDR_RESET_TIME 0x0A 0
+// 				 USB3_DP_PCS_ALIGN_DETECT_CONFIG1 0x88 0
+// 				 USB3_DP_PCS_ALIGN_DETECT_CONFIG2 0x13 0
+// 				 USB3_DP_PCS_PCS_TX_RX_CONFIG 0x0C 0
+// 				 USB3_DP_PCS_EQ_CONFIG1 0x4B 0
+// 				 USB3_DP_PCS_EQ_CONFIG5 0x10 0
+// 				 USB3_DP_PCS_USB3_LFPS_DET_HIGH_COUNT_VAL 0xF8 0
+// 				 USB3_DP_PCS_USB3_RXEQTRAINING_DFE_TIME_S2 0x07 0
+// 				 0xffffffff 0xffffffff 0x00>;
+// };
+
+/*
+ * START: --------------- MDSS (Mobile Display Subsystem) ----------------------
+ *
+ * The original vendor's DTS for `tb371fc` has the following node:
+ *
+ * ```
+ * &mdss_mdp {
+ * 	clock-rate = <0 0 0 0 460000000 19200000 300000000 19200000>;
+ * };
+ * ```
+ *
+ * The original upstream `kona` node of 4.19 kernel has:
+ *
+ * ```
+ * &soc {
+ *	mdss_mdp: qcom,mdss_mdp@ae00000 {
+ *		compatible = "qcom,sde-kms";
+ *		...
+ *		clocks =
+ *			<&clock_gcc GCC_DISP_AHB_CLK>,
+ *			<&clock_gcc GCC_DISP_HF_AXI_CLK>,
+ *			<&clock_gcc GCC_DISP_SF_AXI_CLK>,
+ *			<&clock_dispcc DISP_CC_MDSS_AHB_CLK>,
+ *			<&clock_dispcc DISP_CC_MDSS_MDP_CLK>,
+ *			<&clock_dispcc DISP_CC_MDSS_VSYNC_CLK>,
+ *			<&clock_dispcc DISP_CC_MDSS_MDP_LUT_CLK>,
+ *			<&clock_dispcc DISP_CC_MDSS_ROT_CLK>;
+ *		clock-names = "gcc_iface", "gcc_bus", "gcc_nrt_bus",
+ *				"iface_clk", "core_clk", "vsync_clk",
+ *				"lut_clk", "rot_clk";
+ *		clock-rate = <0 0 0 0 300000000 19200000 300000000 19200000>;
+ *		clock-max-rate = <0 0 0 0 460000000 19200000 460000000
+ *					460000000>;
+ *	};
+ * };
+ * ```
+ *
+ * Quite likely the change for `tb371fc` was made to increase the MDP core clock rate
+ * from 300MHz to 460MHz:
+ *
+ * The new DTS node has split description:
+ * ```
+ * mdss: display-subsystem@ae00000 {
+ * 	compatible = "qcom,sm8250-mdss";
+ * 	...
+ * 	clocks = <&dispcc DISP_CC_MDSS_AHB_CLK>,
+ * 			<&gcc GCC_DISP_HF_AXI_CLK>,
+ * 			<&gcc GCC_DISP_SF_AXI_CLK>,
+ * 			<&dispcc DISP_CC_MDSS_MDP_CLK>;
+ * 	clock-names = "iface", "bus", "nrt_bus", "core";
+ * 	...
+ * 	mdss_mdp: display-controller@ae01000 {
+ * 		compatible = "qcom,sm8250-dpu";
+ * 		...
+ * 		clocks = <&dispcc DISP_CC_MDSS_AHB_CLK>,
+ * 				<&gcc GCC_DISP_HF_AXI_CLK>,
+ * 				<&dispcc DISP_CC_MDSS_MDP_CLK>,
+ * 				<&dispcc DISP_CC_MDSS_VSYNC_CLK>;
+ * 		clock-names = "iface", "bus", "core", "vsync";
+ * 
+ * 		assigned-clocks = <&dispcc DISP_CC_MDSS_VSYNC_CLK>;
+ * 		assigned-clock-rates = <19200000>;
+ * 		...
+ * 	};
+ * };
+ * ```
+ *
+ * So, quite likely the new `assigned-clocks` and `assigned-clock-rates`
+ * should be added to the `mdss_mdp` node.
+ *
+ */
+
+&mdss_mdp {
+	assigned-clocks = <&dispcc DISP_CC_MDSS_VSYNC_CLK &dispcc DISP_CC_MDSS_MDP_CLK>;
+	assigned-clock-rates = <19200000 460000000>;
+};
+
+&mdss_dsi0_phy {
+
+	/* 
+	 * What the alternative?
+	 * It was in 4.19 but not available here
+	 * The vendor changed the last line
+	 * `00 00 8a 8a` to `20 00 8a 8a`.
+	 */
+
+	// qcom,platform-lane-config = [00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     20 00 8a 8a];
+};
+
+&mdss_dsi1_phy {
+
+	/* 
+	 * What the alternative?
+	 * It was in 4.19 but not available here
+	 * The vendor changed the last line
+	 * `00 00 8a 8a` to `20 00 8a 8a`.
+	 */
+
+	// qcom,platform-lane-config = [00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     00 00 0a 0a
+	// 			     20 00 8a 8a];
+};
+
+/* 
+ * END: ----------------- MDSS (Mobile Display Subsystem) ----------------------
+ */
+
+/* 
+ * START: ----------------- CCI (Camera Control Interface) ----------------------
+ *
+ * Originally, the matching external `kona-camera.dtsi`
+ * for the `tb371fc` uses two nodes, each of them
+ * using two pairs of I2C lines (indexes 0 and 1 for the first CCI and
+ * indexes 2 and 3 for the second CCI).
+ *
+ * ```
+ * cam_cci0: qcom,cci@ac4f000 {
+ * 	compatible = "qcom,cci";
+ * 	pinctrl-0 = <&cci0_active &cci1_active>;
+ * 	pinctrl-1 = <&cci0_suspend &cci1_suspend>;
+ * 	gpios = <&tlmm 101 0>,
+ * 		<&tlmm 102 0>,
+ * 		<&tlmm 103 0>,
+ * 		<&tlmm 104 0>;
+ * 	gpio-req-tbl-num = <0 1 2 3>;
+ * 	gpio-req-tbl-flags = <1 1 1 1>;
+ * 	gpio-req-tbl-label = "CCI_I2C_DATA0",
+ * 			     "CCI_I2C_CLK0",
+ * 			     "CCI_I2C_DATA1",
+ * 			     "CCI_I2C_CLK1";
+ * };
+ * 
+ * cam_cci1: qcom,cci@ac50000 {
+ * 	compatible = "qcom,cci";
+ * 	pinctrl-0 = <&cci2_active &cci3_active>;
+ * 	pinctrl-1 = <&cci2_suspend &cci3_suspend>;
+ * 	gpios = <&tlmm 105 0>,
+ * 		<&tlmm 106 0>,
+ * 		<&tlmm 107 0>,
+ * 		<&tlmm 108 0>;
+ * 	gpio-req-tbl-num = <0 1 2 3>;
+ * 	gpio-req-tbl-flags = <1 1 1 1>;
+ * 	gpio-req-tbl-label = "CCI_I2C_DATA2",
+ * 			     "CCI_I2C_CLK2",
+ * 			     "CCI_I2C_DATA3",
+ * 			     "CCI_I2C_CLK3";
+ * };
+ * ```
+ *
+ * But the vendor changed it to use only one pair of I2C lines per each CCI.
+ *
+ * However, the CCI1 description starts from second pair of I2C lines (indexes 2 and 3),
+ * but uses the only one (index 2).
+ *
+ *
+ * ```
+ * Original `tb371fc` nodes:
+ * &cam_cci0 {
+ * 	pinctrl-0 = <&cci0_active>;
+ * 	pinctrl-1 = <&cci0_suspend>;
+ * 	gpios = <&tlmm 101 GPIO_ACTIVE_HIGH>,
+ * 		<&tlmm 102 GPIO_ACTIVE_HIGH>;
+ * 	gpio-req-tbl-num = <0 1>;
+ * 	gpio-req-tbl-flags = <1 1>;
+ * 	gpio-req-tbl-label = "CCI_I2C_DATA0", "CCI_I2C_CLK0";
+ * };
+ * 
+ * &cam_cci1 {
+ * 	pinctrl-0 = <&cci2_active>;
+ * 	pinctrl-1 = <&cci2_suspend>;
+ * 	gpios = <&tlmm 105 GPIO_ACTIVE_HIGH>,
+ * 		<&tlmm 106 GPIO_ACTIVE_HIGH>;
+ * 	gpio-req-tbl-num = <0 1>;
+ * 	gpio-req-tbl-flags = <1 1>;
+ * 	gpio-req-tbl-label = "CCI_I2C_DATA2", "CCI_I2C_CLK2";
+ * };
+ * ```
+ *
+ * The `sm8250.dtsi` already describes the pins the same way.
+ * Note 101, 102 and 105, 106:
+ * ```
+ * cci0_default: cci0-default-state {
+ * 	cci0_i2c0_default: cci0-i2c0-default-pins {
+ * 		pins = "gpio101", "gpio102";
+ * 	};
+ * 
+ * 	cci0_i2c1_default: cci0-i2c1-default-pins {
+ * 		pins = "gpio103", "gpio104";
+ * 	};
+ * };
+ * 
+ * cci1_default: cci1-default-state {
+ * 	cci1_i2c0_default: cci1-i2c0-default-pins {
+ * 		pins = "gpio105","gpio106";
+ * 	};
+ * 
+ * 	cci1_i2c1_default: cci1-i2c1-default-pins {
+ * 		pins = "gpio107","gpio108";
+ * 	};
+ * };
+ * ```
+ *
+ * Also, the `sm8250.dtsi` describes per two pairs of I2C buses:
+ * 
+ * ```
+ * cci0: cci@ac4f000 {
+ * 	compatible = "qcom,sm8250-cci", "qcom,msm8996-cci";
+ * 
+ * 	cci0_i2c0: i2c-bus@0 {
+ * 		...
+ * 	};
+ * 
+ * 	cci0_i2c1: i2c-bus@1 {
+ * 		...
+ * 	};
+ * };
+ * 
+ * 
+ * cci1: cci@ac50000 {
+ * 	compatible = "qcom,sm8250-cci", "qcom,msm8996-cci";
+ * 
+ * 	cci1_i2c0: i2c-bus@0 {
+ * 		...
+ * 	};
+ * 
+ * 	cci1_i2c1: i2c-bus@1 {
+ * 		...
+ * 	};
+ * };
+ *```
+ *
+ * So, as originally the vendor released every second pair of gpios
+ * and every second I2C bus for CCI0 and CCI1, let's do the same:
+ */
+
+&cci0_default {
+	/delete-node/ cci0-i2c1-default-pins;
+};
+
+&cci0_sleep {
+	/delete-node/ cci0-i2c1-sleep-pins;
+};
+
+&cci1_default {
+	/delete-node/ cci1-i2c1-default-pins;
+};
+
+&cci1_sleep {
+	/delete-node/ cci1-i2c1-sleep-pins;
+};
+
+&cci0 {
+	/delete-node/ i2c-bus@1;
+};
+
+&cci1 {
+	/delete-node/ i2c-bus@1;
+};
+
+/*
+ * END: ------------------- CCI (Camera Control Interface) ---------------------
+ */
+
+&i2c15 {
+	status = "ok";
+
+	/*
+	 * This node was deleted in vendor DTS,
+	 * but since it also not exists in base `sm8250.dtsi`,
+	 * it will have no effect.
+	 */
+	// /delete-node/ fsa4480@43;
+
+	/*
+	 * START: ------------- NXP TFA98xx Smart Amp --------------------------
+	 * 
+	 * Originally in 4.19 kernel the `compatible`
+	 * was `tfa,tfa98xx`, but in newer kernels it's changed
+	 * to be more specific.
+	 *
+	 * TODO:
+	 *     It must be chosen:
+	 *       - nxp,tfa9890
+	 *       - nxp,tfa9895
+	 *       - nxp,tfa9897
+	 */
+
+	// tfa98xx@34 {
+	// 	compatible = "tfa,tfa98xx";
+	// 	reg = <0x34>;
+	// 	reset-gpio = <&tlmm 0x73 GPIO_ACTIVE_HIGH>;
+	// };
+
+	// tfa98xx@35 {
+	// 	compatible = "tfa,tfa98xx";
+	// 	reg = <0x35>;
+	// 	reset-gpio = <&tlmm 0x75 GPIO_ACTIVE_HIGH>;
+	// };
+
+	// tfa98xx@36 {
+	// 	compatible = "tfa,tfa98xx";
+	// 	reg = <0x36>;
+	// 	reset-gpio = <&tlmm 0x76 GPIO_ACTIVE_HIGH>;
+	// };
+
+	// tfa98xx@37 {
+	// 	compatible = "tfa,tfa98xx";
+	// 	reg = <0x37>;
+	// 	reset-gpio = <&tlmm 0x74 GPIO_ACTIVE_HIGH>;
+	// };
+
+	/*
+	 * END: --------------- NXP TFA98xx Smart Amp -------------------------- 
+	 */
+};
+
+&i2c19 {
+	status = "ok";
+
+	/*
+	 * START: ------- FSA4480 - USB Type-C Analog Audio Switch -------------
+	 *
+	 * Original `tb371fc` node from 4.19 kernel:
+	 *
+	 * ```
+	 *     fsa4480: fsa4480@42 {
+	 *         compatible = "qcom,fsa4480";
+	 *         reg = <0x42>;
+	 *     };
+	 * ```
+	 *
+	 * But in newer kernels the node was modified to:
+	 *     compatible = "fsa,fsa4480";
+	 *
+	 * Moreover it requires at least:
+	 * ```
+	 * required:
+	 *   - compatible
+	 *   - reg
+	 *   - port
+	 * ```
+	 *
+	 * But, the `port` property must be pointing to the Type C port like below:
+	 *
+	 * ```
+	 * &pm8150_typec {
+	 *	 status = "okay";
+	 *	 connector {
+	 *	 	compatible = "usb-c-connector";
+	 *	 	ports {
+	 *	 		...
+	 *	 		port@2 {
+	 *	 			reg = <2>;
+	 *	 			pm8150_typec_sbu_out: endpoint {
+	 *	 				remote-endpoint = <&fsa4480_sbu_mux>;
+	 *	 			};
+	 *	 		};
+	 *	 	};
+	 *	 };
+	 * };
+	 * ```
+	 *
+	 * But it is not available in base `pm8150.dtsi`
+	 */
+
+	// TODO: enable when remote port will be available
+
+	// typec-mux@42 {
+	// 	compatible = "fsa,fsa4480";
+	// 	reg = <0x42>;
+
+	// 	port {
+	// 		fsa4480_sbu_mux: endpoint {
+	// 			remote-endpoint = <&pm8150_typec_sbu_out>;
+	// 		};
+	// 	};
+	// };
+
+	/*
+	 * END: ------- FSA4480 - USB Type-C Analog Audio Switch ---------------
+	 */
+};
+
+&spi14 {
+	status = "ok";
+};
+
+/*
+ * START: --- Time Division Multiplexed (TDM) Digital Audio Interface (DAI) ----
+ *
+ * Originally in `tb371fc` for 4.19 the vendor made next:
+ * 
+ * ```
+ * &tdm_pri_rx {
+ * 	qcom,msm-cpudai-tdm-clk-rate = <6144000>;
+ * 	qcom,msm-cpudai-tdm-sync-mode = <0>;
+ * };
+ * 
+ * &tdm_pri_tx {
+ * 	qcom,msm-cpudai-tdm-clk-rate = <6144000>;
+ * 	qcom,msm-cpudai-tdm-sync-mode = <0>;
+ * };
+ * ```
+ * The defalt values from `qcom/msm-audio-lpass.dtsi`:
+ * ```
+ * 	tdm_pri_rx: qcom,msm-dai-tdm-pri-rx {
+ * 		compatible = "qcom,msm-dai-tdm";
+ * 		...
+ * 		qcom,msm-cpudai-tdm-clk-rate = <1536000>;
+ * 		...
+ * 		qcom,msm-cpudai-tdm-sync-mode = <1>;
+ * 	};
+ * 	tdm_pri_tx: qcom,msm-dai-tdm-pri-tx {
+ * 		compatible = "qcom,msm-dai-tdm";
+ *		...
+ * 		qcom,msm-cpudai-tdm-clk-rate = <1536000>;
+ * 		...
+ * 		qcom,msm-cpudai-tdm-sync-mode = <1>;
+ *	};
+ * ```
+ *
+ * So the vendor increased Clock Rate by 4 times (1.536 MHz * 4 = 6.144 MHz)
+ * and changed Sync Mode from Long (1) to Short (0).
+ *
+ * Clock Rate = 6144000 = 1536000 * 4
+ * Sync Mode = 0 = Short sync bit mode << vendor used
+ * Sync Mode = 1 = Long sync mode << base
+ */
+
+&q6afedai {
+	qcom,tdm-sync-mode = <0>;
+};
+
+/*
+ * Probably the setting of clock rate is non needed any more:
+ *
+ * AI overview:
+ *   - the consumer node (like a DAI link) references the clock, 
+ *     and the driver code handles the scaling via clk_set_rate 
+ *     based on the audio sample rate
+ */
+
+/*
+ * END: --- Time Division Multiplexed (TDM) Digital Audio Interface (DAI) ------
+ */
+
+&{/reserved-memory} {
+	bootlog_mem: boot_log_region@0 {
+		compatible = "removed-dma-pool";
+		no-map;
+		reg = <0x0 0xb0000000 0x0 0x80000>;
+	};
+};

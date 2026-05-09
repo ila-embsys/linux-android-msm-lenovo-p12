@@ -1,0 +1,16 @@
+/dts-v1/;
+
+#include "sm8250-lenovo-tb371fc-simplefb.dts"
+
+&mdss_mdp {
+	qcom,sde-sspp-linewidth = <0x758>;
+
+	qcom,sde-limits {
+		qcom,sde-linewidth-limits {
+			qcom,sde-limit-name = "sspp_linewidth_usecases";
+			qcom,sde-limit-cases = "vig", "dma", "scale", "inline_rot";
+			qcom,sde-limit-ids = <0x01 0x02 0x04 0x08>;
+			qcom,sde-limit-values = <0x01 0x758 0x05 0xa00 0x02 0x1000 0x09 0x440>;
+		};
+	};
+};

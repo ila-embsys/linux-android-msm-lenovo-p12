@@ -1,0 +1,31 @@
+/dts-v1/;
+
+#include "sm8250-lenovo-tb371fc-desktop.dts"
+
+// &{/reserved-memory} {
+// 	bootlog_mem: boot_log_region@0 {
+// 		compatible = "removed-dma-pool";
+// 		no-map;
+// 		reg = <0x0 0xb0000000 0x0 0x80000>;
+// 	};
+// };
+
+// &cont_splash_memory {
+// 	compatible = "removed-dma-pool";
+// 	no-map;
+// };
+
+// &disp_rdump_memory {
+// 	compatible = "removed-dma-pool";
+// 	no-map;
+// };
+
+// &glink_adsp {
+// 	#address-cells = <1>;
+// 	#size-cells = <0>;
+
+// 	audio_gpr: qcom,gpr {
+// 		#address-cells = <1>;
+// 		#size-cells = <0>;
+// 	};
+// };
