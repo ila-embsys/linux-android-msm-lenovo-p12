@@ -31,6 +31,6 @@ jobs:
           other-clang-url: https://github.com/sticpaper/Snapdragon-LLVM-ARM-Compiler-10.0.7-for-Android-NDK
           other-clang-branch: main
           anykernel3: true
-          bootimg-url: https://github.com/tem423/KernelSU_Action/releases/download/boot/boot.img
+          bootimg-url: https://github.com/tem423/linux-android-msm-lenovo-p12/releases/download/originalboot/boot.img
           release: false
           access-token: ${{ secrets.GITHUB_TOKEN }}
