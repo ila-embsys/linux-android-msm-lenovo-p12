@@ -33,14 +33,14 @@
 };
 
 &soc {
-	/* What the driver uses it? */
+	/* Which driver uses it? */
 	sim: simtray {
 		compatible = "Lenovo,simtray-status";
 		cd-gpios = <&tlmm 14 GPIO_ACTIVE_HIGH>;
 	};
 
 	/*
-	 * This node must be related to the `drivers/soc/qcom/serial_num.c`,
+	 * This node must be related to `drivers/soc/qcom/serial_num.c`,
 	 * though it's missing and likely will not work at all.
 	 */
 	sn_fuse: snfuse@786134 {
@@ -51,8 +51,8 @@
 
 	/*
 	 * `IPA` (IP Accelerator) is missing in `sm8250.dtsi`.
-	 * The vendor disabled it in 4.19 kernel, but it is already not found
-	 * in base dtsi.
+	 * The vendor disabled it in the 4.19 kernel, but it is already not found
+	 * in the base dtsi.
 	 * So, comment out and skip this node.
 	 */
 
@@ -74,8 +74,8 @@
 	 * };
 	 * ```
 	 *
-	 * But it is not included into `sm8250.dtsi`.
-	 * Should it be added manually like below?
+	 * But it is not included in `sm8250.dtsi`.
+	 * Should it be added manually as follows?
 	 */
 
 	// slim: slim-ngd@3ac0000 {
@@ -99,8 +99,8 @@
 /*
  * `SDX55M` (High-Performance 5G Modem-RF System)
  *
- * Originally `mdm0` is defined in base `kona.dtsi` in 4.19 kernel
- * like below:
+ * Originally `mdm0` is defined in the base `kona.dtsi` in the 4.19 kernel
+ * as follows:
  *
  * ```
  * mdm0: qcom,mdm0 {
@@ -109,9 +109,9 @@
  * };
  * ```
  *
- * It was disabled by vendor in 4.19 kernel, but it is already not found
- * in base `sm8250.dtsi`. So, likely it is not used at all
- * and nothing to do with it.
+ * It was disabled by the vendor in the 4.19 kernel, but it is already not found
+ * in the base `sm8250.dtsi`. So, likely it is not used at all
+ * and there is nothing to do with it.
  */
 
 // &mdm0 {
@@ -152,7 +152,7 @@
  *   qcom,init-voltage = <3000000>;
  * ```
  *
- * So, the vendor increased the voltage from 3.0V to 3.312V for some unknown reason.
+ * So, the vendor increased the voltage from 3.0V to 3.312V for some reason.
  */
 
 // &pm8150a_l10 {
@@ -185,7 +185,7 @@
  * };
  * ```
  *
- * In the newer kernels quite likely the alternative must be looking like:
+ * In newer kernels, it is quite likely that the alternative looks like:
  * ```
  * &apps_rsc {
  *     regulators-0 {
@@ -216,7 +216,7 @@
 
 		/* 
 		 * LDO10 was 3.0V in base, 3.312V in vendor.
-		 * Porting it exactly as vendor used.
+		 * Porting it exactly as the vendor used it.
 		 */
 		vreg_l10a_3p3: ldo10 {
 			regulator-name = "vreg_l10a_3p3";
@@ -322,10 +322,10 @@
  * };
  * ```
  *
- * As for the pcie1 pins, can be seen that vendor had changed the pins
+ * As for the pcie1 pins, it can be seen that the vendor had changed the pins
  * to `gpio81`.
  *
- * The original `kona` pcie1 nodes are next:
+ * The original `kona` pcie1 nodes are as follows:
  *
  * ``` qcom/kona-pinctrl.dtsi
  *
@@ -352,9 +352,9 @@
  * 	};
  * ```
  *
- * Can be clearly seen that vendor had changed the pins from `gpio84` to `gpio81`.
+ * It can be clearly seen that the vendor had changed the pins from `gpio84` to `gpio81`.
  *
- * So, making the same as vendor's modification:
+ * So, making the same as the vendor's modification:
  */
 
 &pcie1 {
@@ -377,17 +377,17 @@
 };
 
 /*
- * As the conclusion, the vendor changed the pcie1 wakeup pin configuration
- * from `gpio84` to `gpio81` and make the `bias-pull-up` to `bias-disable`.
+ * In conclusion, the vendor changed the pcie1 wakeup pin configuration
+ * from `gpio84` to `gpio81` and changed the `bias-pull-up` to `bias-disable`.
  *
- * Note, that the original `gpio81` is using for pcie0 wake up.
+ * Note that the original `gpio81` is used for pcie0 wake up.
  *
  * END: ------------------------- PCIE1 wakeup-pin -----------------------------
  */
 
 /*
- * Kept the original `pcie2` disable,
- * though it is already disabled by default in the `sm8250.dtsi`.
+ * Keep the original `pcie2` disabled,
+ * though it is already disabled by default in `sm8250.dtsi`.
  */
 
 &pcie2 {
@@ -414,15 +414,15 @@
 	 * ```
 	 *
 	 * At least the `gpio60` in the `qcom/kona-pinctrl.dtsi` in 4.19
-	 * kernel is using for `sde_dsi` as well as `spi11/i2c11`.
-	 * So, probably `sde_dsi` pins were freed for `spi11/i2c11`.
+	 * kernel is used for `sde_dsi` as well as `spi11/i2c11`.
+	 * So, probably the `sde_dsi` pins were freed for `spi11/i2c11`.
 	 *
 	 * Since the `sm8250.dtsi` uses `gpio60` only for spi11/i2c11, 
-	 * probably it is no need to make any changes.
+	 * there is probably no need to make any changes.
 	 */
 
 	/* 
-	 * The next additions need to be converted.
+	 * The following additions need to be converted.
 	 *
 	 * ```
 	 * pmx_sde_bl {
@@ -511,9 +511,9 @@
 	};
 
 	/* 
-	 * In original `tb371fc` references `storage_cd` with only
-	 * change of `pins` to `gpio14`.
-	 * Since `sm8250.dtsi` has lack of such node, define it here fully.
+	 * The original `tb371fc` references `storage_cd` with only
+	 * a change of `pins` to `gpio14`.
+	 * Since `sm8250.dtsi` lacks such a node, define it here fully.
 	 */
 	storage_cd {
 		pins = "gpio14";
@@ -523,9 +523,9 @@
 	};
 
 	/* 
-	 * In original `tb371fc`, NFC related nodes below were
-	 * referenced, but since in `sm8250.dtsi` they are not
-	 * defined, so define them here fully.
+	 * In the original `tb371fc`, NFC related nodes below were
+	 * referenced, but since they are not defined in `sm8250.dtsi`,
+	 * define them here fully.
 	 */
 
 	nfc_enable_active: nfc_enable_active {
@@ -614,7 +614,7 @@
  * ```
  *
  * In `sm8250.dtsi`, the nodes using `gpio78` are
- * `cam2_default` and `cam2_suspend`, so change exact only them
+ * `cam2_default` and `cam2_suspend`, so change only them specifically
  */
 
 &cam2_default {
@@ -634,7 +634,7 @@
  */
 
 /*
- * What the alternative for setting `qmp-phy-init-seq`?
+ * What is the alternative for setting `qmp-phy-init-seq`?
  */
 
 // &usb_1_qmpphy {
@@ -870,8 +870,8 @@
 &mdss_dsi0_phy {
 
 	/* 
-	 * What the alternative?
-	 * It was in 4.19 but not available here
+	 * What is the alternative?
+	 * It was in 4.19 but is not available here
 	 * The vendor changed the last line
 	 * `00 00 8a 8a` to `20 00 8a 8a`.
 	 */
@@ -886,8 +886,8 @@
 &mdss_dsi1_phy {
 
 	/* 
-	 * What the alternative?
-	 * It was in 4.19 but not available here
+	 * What is the alternative?
+	 * It was in 4.19 but is not available here
 	 * The vendor changed the last line
 	 * `00 00 8a 8a` to `20 00 8a 8a`.
 	 */
@@ -907,7 +907,7 @@
  * START: ----------------- CCI (Camera Control Interface) ----------------------
  *
  * Originally, the matching external `kona-camera.dtsi`
- * for the `tb371fc` uses two nodes, each of them
+ * for the `tb371fc` uses two nodes, each
  * using two pairs of I2C lines (indexes 0 and 1 for the first CCI and
  * indexes 2 and 3 for the second CCI).
  *
@@ -947,8 +947,8 @@
  *
  * But the vendor changed it to use only one pair of I2C lines per each CCI.
  *
- * However, the CCI1 description starts from second pair of I2C lines (indexes 2 and 3),
- * but uses the only one (index 2).
+ * However, the CCI1 description starts from the second pair of I2C lines (indexes 2 and 3),
+ * but uses only one (index 2).
  *
  *
  * ```
@@ -974,7 +974,7 @@
  * };
  * ```
  *
- * The `sm8250.dtsi` already describes the pins the same way.
+ * The `sm8250.dtsi` already describes the pins in the same way.
  * Note 101, 102 and 105, 106:
  * ```
  * cci0_default: cci0-default-state {
@@ -998,7 +998,7 @@
  * };
  * ```
  *
- * Also, the `sm8250.dtsi` describes per two pairs of I2C buses:
+ * Also, `sm8250.dtsi` describes two pairs of I2C buses:
  * 
  * ```
  * cci0: cci@ac4f000 {
@@ -1064,7 +1064,7 @@
 
 	/*
 	 * This node was deleted in vendor DTS,
-	 * but since it also not exists in base `sm8250.dtsi`,
+	 * but since it also does not exist in the base `sm8250.dtsi`,
 	 * it will have no effect.
 	 */
 	// /delete-node/ fsa4480@43;
@@ -1077,7 +1077,7 @@
 	 * to be more specific.
 	 *
 	 * TODO:
-	 *     It must be chosen:
+	 *     One of these must be chosen:
 	 *       - nxp,tfa9890
 	 *       - nxp,tfa9895
 	 *       - nxp,tfa9897
@@ -1158,10 +1158,10 @@
 	 * };
 	 * ```
 	 *
-	 * But it is not available in base `pm8150.dtsi`
+	 * But it is not available in the base `pm8150.dtsi`
 	 */
 
-	// TODO: enable when remote port will be available
+	// TODO: enable when the remote port is available
 
 	// typec-mux@42 {
 	// 	compatible = "fsa,fsa4480";
@@ -1186,7 +1186,7 @@
 /*
  * START: --- Time Division Multiplexed (TDM) Digital Audio Interface (DAI) ----
  *
- * Originally in `tb371fc` for 4.19 the vendor made next:
+ * Originally in `tb371fc` for 4.19, the vendor did the following:
  * 
  * ```
  * &tdm_pri_rx {
@@ -1199,7 +1199,7 @@
  * 	qcom,msm-cpudai-tdm-sync-mode = <0>;
  * };
  * ```
- * The defalt values from `qcom/msm-audio-lpass.dtsi`:
+ * The default values from `qcom/msm-audio-lpass.dtsi`:
  * ```
  * 	tdm_pri_rx: qcom,msm-dai-tdm-pri-rx {
  * 		compatible = "qcom,msm-dai-tdm";
@@ -1217,7 +1217,7 @@
  *	};
  * ```
  *
- * So the vendor increased Clock Rate by 4 times (1.536 MHz * 4 = 6.144 MHz)
+ * So the vendor increased the clock rate fourfold (1.536 MHz * 4 = 6.144 MHz)
  * and changed Sync Mode from Long (1) to Short (0).
  *
  * Clock Rate = 6144000 = 1536000 * 4
@@ -1230,7 +1230,7 @@
 };
 
 /*
- * Probably the setting of clock rate is non needed any more:
+ * Probably the setting of the clock rate is no longer needed:
  *
  * AI overview:
  *   - the consumer node (like a DAI link) references the clock, 
