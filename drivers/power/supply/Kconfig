@@ -8,15 +8,6 @@ menuconfig POWER_SUPPLY
 
 if POWER_SUPPLY
 
-config MM8013C06_BATTERY
-    tristate "Mitsumi MM8013C06 battery driver"
-    depends on I2C
-    select REGMAP_I2C
-    help
-      Say Y here to enable the Mitsumi MM8013C06 battery driver.
-      It enables the monitoring of many battery parameters, including
-      voltage, current, temperature, and state of charge.
-
 config POWER_SUPPLY_DEBUG
 	bool "Power supply debug"
 	help
