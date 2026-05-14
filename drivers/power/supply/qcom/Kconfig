@@ -188,6 +188,5 @@ config MM8013_FG
 config POGO
 	help
 	  Say Y here to enable the POGO driver. 
-endmenu
 
 endmenu
