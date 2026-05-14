@@ -166,6 +166,9 @@ static void dsi_bridge_pre_enable(struct drm_bridge *bridge)
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 
+	DSI_WARN("Skipping dsi_bridge_pre_enable.");
+	return;
+
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
 		return;
@@ -225,6 +228,9 @@ static void dsi_bridge_enable(struct drm_bridge *bridge)
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 	struct dsi_display *display;
 
+	DSI_WARN("Skipping dsi_bridge_enable.");
+	return;
+
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
 		return;
@@ -258,6 +264,9 @@ static void dsi_bridge_disable(struct drm_bridge *bridge)
 	struct dsi_display *display;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
 
+	DSI_WARN("Skipping dsi_bridge_disable.");
+	return;
+
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
 		return;
@@ -284,6 +293,9 @@ static void dsi_bridge_post_disable(struct drm_bridge *bridge)
 {
 	int rc = 0;
 	struct dsi_bridge *c_bridge = to_dsi_bridge(bridge);
+
+	DSI_WARN("Skipping dsi_bridge_post_disable.");
+	return;
 
 	if (!bridge) {
 		DSI_ERR("Invalid params\n");
