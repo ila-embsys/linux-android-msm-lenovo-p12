@@ -1,7 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-if POWER_SUPPLY
-
 menu "Qualcomm Technologies, Inc. Charger and Fuel Gauge support"
 
 config QPNP_SMB2
@@ -183,15 +181,4 @@ config SMB1398_CHARGER
 	      wireless charger receiver and provide the input for downstream
 	      chargers.
 
-config MM8013_FG
-	bool "MM8013 Fuel Gauge driver"
-	help
-	  Say Y here to enable the Fuel Gauge driver. 
-
-config POGO
-	bool "POGO driver"
-	help
-	  Say Y here to enable the POGO driver.
 endmenu
-
-endif
