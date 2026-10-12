@@ -7,7 +7,7 @@
  */
 
 #include <linux/delay.h>
-#include <linux/device-id/of.h>
+#include <linux/of_device.h>
 #include <linux/gpio/consumer.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -49,7 +49,9 @@ struct panel_info {
 };
 
 static const struct regulator_bulk_data nt36532_supplies[] = {
-	{ .supply = "vddio" }, /* 1.8v */
+	{ .supply = "vddio" },
+	{ .supply = "vsp" },
+	{ .supply = "vsn" },
 };
 
 static inline struct nt36532 *to_nt36532(struct drm_panel *panel)
@@ -98,9 +100,8 @@ static int nt36532_prepare(struct drm_panel *panel)
 
 static int nt36532_off(struct nt36532 *ctx)
 {
-	struct mipi_dsi_device *dsi = to_primary_dsi(ctx);
+	struct mipi_dsi_device *dsi = ctx->panel_info->is_dual_dsi ? ctx->dsi[1] : ctx->dsi[0];
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
-
 	mipi_dsi_dcs_set_display_off_multi(&dsi_ctx);
 	mipi_dsi_usleep_range(&dsi_ctx, 10000, 10100);
 	mipi_dsi_dcs_enter_sleep_mode_multi(&dsi_ctx);
@@ -141,9 +142,91 @@ static const struct drm_panel_funcs nt36532_panel_funcs = {
 	.get_modes = nt36532_get_modes,
 };
 
+static int tianma_init_sequence(struct nt36532 *ctx)
+{
+	struct mipi_dsi_device *dsi = ctx->panel_info->is_dual_dsi ? ctx->dsi[1] : ctx->dsi[0];
+	struct drm_dsc_picture_parameter_set pps;
+	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
+
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x20);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x32, 0x72);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x10);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x3b, 0x03, 0xb8, 0x1a, 0x0a, 0x0a, 0x00);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x27);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x13, 0x06);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xd0, 0x31);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xd1, 0x84);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xd2, 0x38);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x25);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x0f, 0x20);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x23);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xbc, 0x04, 0x00, 0x3c);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xff, 0x10);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0xfb, 0x01);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x11, 0x00);
+	mipi_dsi_msleep(&dsi_ctx, 120);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x29, 0x00);
+	mipi_dsi_msleep(&dsi_ctx, 100);
+
+	/* Enable DSC */
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x90, 0x03);
+	drm_dsc_pps_payload_pack(&pps, ctx->panel_info->dsc_cfg);
+	mipi_dsi_picture_parameter_set_multi(&dsi_ctx, &pps);
+	mipi_dsi_dcs_write_seq_multi(&dsi_ctx, 0x9d, 0x01);
+
+	mipi_dsi_dcs_exit_sleep_mode_multi(&dsi_ctx);
+	mipi_dsi_msleep(&dsi_ctx, 120);
+
+	mipi_dsi_dcs_set_display_on_multi(&dsi_ctx);
+	mipi_dsi_usleep_range(&dsi_ctx, 10000, 10100);
+
+	return dsi_ctx.accum_err;
+}
+
+static const struct drm_display_mode tianma_display_mode = {
+	.clock = 3490 * 2050 * 120 / 1000,
+	.hdisplay = 1472 * 2,
+	.hsync_start = (1472 + 201) * 2,
+	.hsync_end = (1472 + 201 + 12) * 2,
+	.htotal = (1472 + 201 + 60 + 12) * 2,
+	.vdisplay = 1840,
+	.vsync_start = 1840 + 26,
+	.vsync_end = 1840 + 26 + 2,
+	.vtotal = 1840 + 26 + 182 + 2,
+};
+
+static struct drm_dsc_config tianma_dsc_cfg = {
+	.dsc_version_major = 1,
+	.dsc_version_minor = 1,
+	.slice_height = 20,
+	.slice_width = 736,
+	.slice_count = 2,
+	.bits_per_component = 8,
+	.bits_per_pixel = 8 << 4,
+	.block_pred_enable = true,
+};
+
+static const struct panel_info tianma_panel_info = {
+	.width_mm = 274,
+	.height_mm = 171,
+	.lanes = 4,
+	.format = MIPI_DSI_FMT_RGB888,
+	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
+		      MIPI_DSI_MODE_LPM,
+	.display_mode = tianma_display_mode,
+	.dsc_cfg = &tianma_dsc_cfg,
+	.init_sequence = tianma_init_sequence,
+	.is_dual_dsi = true,
+};
+
 static int csot_init_sequence(struct nt36532 *ctx)
 {
-	struct mipi_dsi_device *dsi = to_primary_dsi(ctx);
+	struct mipi_dsi_device *dsi = ctx->panel_info->is_dual_dsi ? ctx->dsi[1] : ctx->dsi[0];
 	struct drm_dsc_picture_parameter_set pps;
 	struct mipi_dsi_multi_context dsi_ctx = { .dsi = dsi };
 
@@ -327,11 +410,15 @@ static int nt36532_probe(struct mipi_dsi_device *dsi)
 	int num_dsi = 1;
 	int ret, i;
 
-	ctx = devm_drm_panel_alloc(dev, struct nt36532, panel,
-				   &nt36532_panel_funcs,
-				   DRM_MODE_CONNECTOR_DSI);
-	if (IS_ERR(ctx))
-		return PTR_ERR(ctx);
+	ctx = devm_kzalloc(dev, sizeof(*ctx), GFP_KERNEL);
+	if (!ctx)
+		return -ENOMEM;
+	drm_panel_init(&ctx->panel, dev, &nt36532_panel_funcs, DRM_MODE_CONNECTOR_DSI);
+
+	ret = drm_panel_of_backlight(&ctx->panel);
+	if (ret)
+		return ret;
+
 
 	ret = devm_regulator_bulk_get_const(&dsi->dev,
 					    ARRAY_SIZE(nt36532_supplies),
@@ -363,7 +450,7 @@ static int nt36532_probe(struct mipi_dsi_device *dsi)
 			return dev_err_probe(dev, -EPROBE_DEFER,
 					     "cannot get secondary DSI host\n");
 
-		ctx->dsi[1] = devm_mipi_dsi_device_register_full(dev, dsi1_host,
+		ctx->dsi[1] = mipi_dsi_device_register_full(dsi1_host,
 								 &dsi_info);
 		if (IS_ERR(ctx->dsi[1])) {
 			dev_err(dev, "cannot get secondary DSI device\n");
@@ -378,7 +465,8 @@ static int nt36532_probe(struct mipi_dsi_device *dsi)
 
 	ctx->panel.prepare_prev_first = true;
 
-	ret = devm_drm_panel_add(dev, &ctx->panel);
+	drm_panel_add(&ctx->panel);
+	ret = 0;
 	if (ret < 0)
 		return dev_err_probe(dev, ret, "failed to add panel\n");
 
@@ -387,7 +475,7 @@ static int nt36532_probe(struct mipi_dsi_device *dsi)
 		ctx->dsi[i]->format = panel_info->format;
 		ctx->dsi[i]->mode_flags = panel_info->mode_flags;
 		ctx->dsi[i]->dsc = panel_info->dsc_cfg;
-		ret = devm_mipi_dsi_attach(dev, ctx->dsi[i]);
+		ret = mipi_dsi_attach(ctx->dsi[i]);
 		if (ret < 0) {
 			return dev_err_probe(dev, ret,
 					     "Failed to attach to DSI host\n");
@@ -403,7 +491,7 @@ static const struct panel_info csot_panel_info = {
 	.lanes = 4,
 	.format = MIPI_DSI_FMT_RGB888,
 	.mode_flags = MIPI_DSI_MODE_VIDEO | MIPI_DSI_CLOCK_NON_CONTINUOUS |
-		      MIPI_DSI_MODE_LPM | MIPI_DSI_MODE_DSC_ALL_SLICES_IN_PKT,
+		      MIPI_DSI_MODE_LPM | 0,
 	.display_mode = csot_display_mode,
 	.dsc_cfg = &csot_dsc_cfg,
 	.init_sequence = csot_init_sequence,
@@ -412,12 +500,30 @@ static const struct panel_info csot_panel_info = {
 
 static const struct of_device_id nt36532_of_match[] = {
 	{ .compatible = "csot,ppc100hb1-1", .data = &csot_panel_info },
+	{ .compatible = "tianma,nt36532", .data = &tianma_panel_info },
 	{ /* sentinel */ }
 };
 MODULE_DEVICE_TABLE(of, nt36532_of_match);
 
+static void nt36532_remove(struct mipi_dsi_device *dsi)
+{
+	struct nt36532 *ctx = mipi_dsi_get_drvdata(dsi);
+	int i;
+
+	for (i = 0; i < 2; i++) {
+		if (ctx->dsi[i])
+			mipi_dsi_detach(ctx->dsi[i]);
+	}
+
+	if (ctx->panel_info->is_dual_dsi)
+		mipi_dsi_device_unregister(ctx->dsi[1]);
+
+	drm_panel_remove(&ctx->panel);
+}
+
 static struct mipi_dsi_driver nt36532_driver = {
 	.probe = nt36532_probe,
+	.remove = nt36532_remove,
 	.driver = {
 		.name = "panel-novatek-nt36532",
 		.of_match_table = nt36532_of_match,

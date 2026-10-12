@@ -20,6 +20,7 @@ properties:
     items:
       - enum:
           - csot,ppc100hb1-1
+          - tianma,nt36532
       - const: novatek,nt36532
 
   reg:
