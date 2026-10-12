@@ -157,7 +157,7 @@ static int ktz8866_probe(struct i2c_client *client)
 	props.brightness = DEFAULT_BRIGHTNESS;
 	props.scale = BACKLIGHT_SCALE_LINEAR;
 
-	backlight_dev = devm_backlight_device_register(&client->dev, "ktz8866-backlight",
+	backlight_dev = devm_backlight_device_register(&client->dev, dev_name(&client->dev),
 					&client->dev, ktz, &ktz8866_backlight_ops, &props);
 	if (IS_ERR(backlight_dev))
 		return dev_err_probe(&client->dev, PTR_ERR(backlight_dev),
