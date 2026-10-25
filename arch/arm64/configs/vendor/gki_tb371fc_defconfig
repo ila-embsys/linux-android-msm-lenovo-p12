@@ -905,18 +905,29 @@ CONFIG_FRAMEBUFFER_CONSOLE=y
 CONFIG_VT=y
 CONFIG_VT_CONSOLE=y
 CONFIG_DRM_SIMPLEDRM=y
-CONFIG_DRM_FBDEV_EMULATION=y
+CONFIG_DRM_FBDEV_EMULATION=n
 
+# ------------------------------------------------------------------------------
+# DRM (Display)
+# ------------------------------------------------------------------------------
+
+CONFIG_DRM_PANEL_NOVATEK_NT36532=y
+CONFIG_DRM_MSM=y
+CONFIG_DRM_MSM_DSI=y
+CONFIG_DRM_MSM_DP=y
+CONFIG_DRM_MSM_DPU=y
+CONFIG_SM_DISPCC_8250=y
+CONFIG_SM_GPUCC_8250=y
+CONFIG_BACKLIGHT_KTZ8866=y
+CONFIG_I2C_QCOM_GENI=y
+CONFIG_REGULATOR_FIXED_VOLTAGE=y
+CONFIG_REGULATOR_QCOM_REFGEN=y
 
 # -----------
 # Experiments
 
 # Could be needed to load testing system
 # CONFIG_BTRFS_FS=y
-
-# Used in display
-# CONFIG_REGULATOR_QCOM_REFGEN=y
-
 
 # Debugging
 # CONFIG_DYNAMIC_DEBUG=y
