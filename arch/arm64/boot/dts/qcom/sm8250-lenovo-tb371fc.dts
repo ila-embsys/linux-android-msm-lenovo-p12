@@ -964,7 +964,7 @@
 
 		// Taken from "dsi-panel-spinel-tianma-nt36532-dsc-3k-video."dtsi
 		// qcom,platform-reset-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>;
-		reset-gpios = <&tlmm 69 GPIO_ACTIVE_HIGH>;
+		reset-gpios = <&tlmm 69 GPIO_ACTIVE_LOW>;
 
 		// While found binding shema doesn't suppose it
 		// keep to follow other "novatek,nt36xxx"
@@ -1160,7 +1160,7 @@
 		vddpos-supply = <&bl_vddpos_5p5>;
 		vddneg-supply = <&bl_vddneg_5p5>;
 
-		enable-gpios = <&tlmm 54 GPIO_ACTIVE_HIGH>;
+		// enable-gpios = <&tlmm 54 GPIO_ACTIVE_HIGH>;
 
 		// current-num-sinks = <6>;
 

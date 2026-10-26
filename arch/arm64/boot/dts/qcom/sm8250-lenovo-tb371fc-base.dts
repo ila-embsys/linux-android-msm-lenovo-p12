@@ -387,7 +387,7 @@
 		vdd-s7-supply = <&vph_pwr>;
 		vdd-s8-supply = <&vph_pwr>;
 
-		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
+		// vdd-l1-l8-supply = <&vreg_s4a_1p8>;
 
 		vdd-bob-supply = <&vph_pwr>;
 
