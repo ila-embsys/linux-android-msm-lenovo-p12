@@ -129,8 +129,8 @@ static void drm_mode_to_intf_timing_params(
 		 * TODO: replace drm_dsc_get_bpp_int with logic to handle
 		 * fractional part if there is fraction
 		 */
-		timing->width = timing->width * drm_dsc_get_bpp_int(dsc) /
-				(dsc->bits_per_component * 3);
+		timing->width = DIV_ROUND_UP(timing->width * drm_dsc_get_bpp_int(dsc),
+					     dsc->bits_per_component * 3);
 		timing->xres = timing->width;
 	}
 }
@@ -298,6 +298,8 @@ static void dpu_encoder_phys_vid_setup_timing_engine(
 	if (phys_enc->hw_cdm)
 		intf_cfg.cdm = phys_enc->hw_cdm->idx;
 	intf_cfg.intf = phys_enc->hw_intf->idx;
+	if (phys_enc->split_role == ENC_ROLE_MASTER)
+		intf_cfg.intf_master = phys_enc->hw_intf->idx;
 	intf_cfg.intf_mode_sel = DPU_CTL_MODE_SEL_VID;
 	intf_cfg.stream_sel = 0; /* Don't care value for video mode */
 	intf_cfg.mode_3d = dpu_encoder_helper_get_3d_blend_mode(phys_enc);
@@ -459,12 +461,15 @@ static void dpu_encoder_phys_vid_enable(struct dpu_encoder_phys *phys_enc)
 	dpu_encoder_phys_vid_setup_timing_engine(phys_enc);
 
 	/*
+	 * For cases where both the interfaces are connected to same ctl,
+	 * set the flush bit for both master and slave.
 	 * For single flush cases (dual-ctl or pp-split), skip setting the
 	 * flush bit for the slave intf, since both intfs use same ctl
 	 * and HW will only flush the master.
 	 */
-	if (dpu_encoder_phys_vid_needs_single_flush(phys_enc) &&
-		!dpu_encoder_phys_vid_is_master(phys_enc))
+	if (!test_bit(DPU_CTL_ACTIVE_CFG, &ctl->caps->features) &&
+	    dpu_encoder_phys_vid_needs_single_flush(phys_enc) &&
+	    !dpu_encoder_phys_vid_is_master(phys_enc))
 		goto skip_flush;
 
 	ctl->ops.update_pending_flush_intf(ctl, phys_enc->hw_intf->idx);

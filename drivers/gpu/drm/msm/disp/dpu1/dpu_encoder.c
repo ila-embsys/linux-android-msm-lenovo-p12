@@ -618,7 +618,7 @@ static struct msm_display_topology dpu_encoder_get_topology(
 		 */
 		topology.num_dsc = 2;
 		topology.num_lm = 2;
-		topology.num_intf = 1;
+		topology.num_intf = intf_count;
 	}
 
 	return topology;
@@ -1189,6 +1189,7 @@ static void dpu_encoder_virt_atomic_mode_set(struct drm_encoder *drm_enc,
 
 	for (i = 0; i < dpu_enc->num_phys_encs; i++) {
 		struct dpu_encoder_phys *phys = dpu_enc->phys_encs[i];
+		int ctl_idx = (i < num_ctl) ? i : (num_ctl - 1);
 
 		phys->hw_pp = dpu_enc->hw_pp[i];
 		if (!phys->hw_pp) {
@@ -1197,7 +1198,7 @@ static void dpu_encoder_virt_atomic_mode_set(struct drm_encoder *drm_enc,
 			return;
 		}
 
-		phys->hw_ctl = i < num_ctl ? to_dpu_hw_ctl(hw_ctl[i]) : NULL;
+		phys->hw_ctl = num_ctl ? to_dpu_hw_ctl(hw_ctl[ctl_idx]) : NULL;
 		if (!phys->hw_ctl) {
 			DPU_ERROR_ENC(dpu_enc,
 				"no ctl block assigned at idx: %d\n", i);
@@ -1924,9 +1925,14 @@ static void dpu_encoder_prep_dsc(struct dpu_encoder_virt *dpu_enc,
 	enc_ip_w = intf_ip_w / 2;
 	initial_lines = dpu_encoder_dsc_initial_line_calc(dsc, enc_ip_w);
 
-	for (i = 0; i < MAX_CHANNELS_PER_ENC; i++)
-		dpu_encoder_dsc_pipe_cfg(ctl, hw_dsc[i], hw_pp[i],
+	for (i = 0; i < MAX_CHANNELS_PER_ENC; i++) {
+		struct dpu_hw_ctl *phys_ctl =
+			(i < dpu_enc->num_phys_encs && dpu_enc->phys_encs[i]) ?
+			dpu_enc->phys_encs[i]->hw_ctl : ctl;
+
+		dpu_encoder_dsc_pipe_cfg(phys_ctl, hw_dsc[i], hw_pp[i],
 					 dsc, dsc_common_mode, initial_lines);
+	}
 }
 
 void dpu_encoder_prepare_for_kickoff(struct drm_encoder *drm_enc)
@@ -2076,11 +2082,15 @@ static void dpu_encoder_unprep_dsc(struct dpu_encoder_virt *dpu_enc)
 	int i;
 
 	for (i = 0; i < MAX_CHANNELS_PER_ENC; i++) {
+		struct dpu_hw_ctl *phys_ctl =
+			(i < dpu_enc->num_phys_encs && dpu_enc->phys_encs[i]) ?
+			dpu_enc->phys_encs[i]->hw_ctl : ctl;
+
 		hw_pp[i] = dpu_enc->hw_pp[i];
 		hw_dsc[i] = dpu_enc->hw_dsc[i];
 
 		if (hw_pp[i] && hw_dsc[i])
-			dpu_encoder_dsc_pipe_clr(ctl, hw_dsc[i], hw_pp[i]);
+			dpu_encoder_dsc_pipe_clr(phys_ctl, hw_dsc[i], hw_pp[i]);
 	}
 }
 
@@ -2154,8 +2164,11 @@ void dpu_encoder_helper_phys_cleanup(struct dpu_encoder_phys *phys_enc)
 	intf_cfg.mode_3d = dpu_encoder_helper_get_3d_blend_mode(phys_enc);
 	intf_cfg.dsc = dpu_encoder_helper_get_dsc(phys_enc);
 
-	if (phys_enc->hw_intf)
+	if (phys_enc->hw_intf) {
 		intf_cfg.intf = phys_enc->hw_intf->idx;
+		if (phys_enc->split_role == ENC_ROLE_MASTER)
+			intf_cfg.intf_master = phys_enc->hw_intf->idx;
+	}
 	if (phys_enc->hw_wb)
 		intf_cfg.wb = phys_enc->hw_wb->idx;
 
@@ -2618,6 +2631,14 @@ unsigned int dpu_encoder_helper_get_dsc(struct dpu_encoder_phys *phys_enc)
 {
 	struct drm_encoder *encoder = phys_enc->parent;
 	struct dpu_encoder_virt *dpu_enc = to_dpu_encoder_virt(encoder);
+	int i;
+
+	if (dpu_enc->num_phys_encs > 1) {
+		for (i = 0; i < dpu_enc->num_phys_encs; i++) {
+			if (dpu_enc->phys_encs[i] == phys_enc && dpu_enc->hw_dsc[i])
+				return BIT(dpu_enc->hw_dsc[i]->idx - DSC_0);
+		}
+	}
 
 	return dpu_enc->dsc_mask;
 }

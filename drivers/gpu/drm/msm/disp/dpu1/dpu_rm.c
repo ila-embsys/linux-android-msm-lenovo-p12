@@ -390,6 +390,9 @@ static int _dpu_rm_reserve_ctls(
 		if (needs_split_display != has_split_display)
 			continue;
 
+		if (features & BIT(DPU_CTL_ACTIVE_CFG))
+			num_ctls = 1;
+
 		ctl_idx[i] = j;
 		DPU_DEBUG("ctl %d match\n", j + CTL_0);
 
