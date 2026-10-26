@@ -884,6 +884,13 @@
 			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
 						   RPMH_REGULATOR_MODE_HPM>;
 		};
+
+		vreg_l14a_1p88: ldo14 {
+			regulator-name = "vreg_l14a_1p88";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1880000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
 	};
 };
 
@@ -948,13 +955,12 @@
 		// Hardcode only one until known "boe" actually exist
 		// on this device
 
-		// compatible = "novatek,nt36532"; // <----------------- stub node `compatible`, the driver likely not existing yet
-		status = "okay";                   //                    commented to avoid configuration picking up once the driver upstreamed
+		compatible = "tianma,nt36532", "novatek,nt36532";
+		status = "okay";
 
 		reg = <0>;
 
-		// vddio-supply = <&...>; // <----------------------- what actually it should be?
-		//                                                    AI suggests `vreg_s4a_1p8`, but gives lack of proofs
+		vddio-supply = <&vreg_l14a_1p88>;
 
 		// Taken from "dsi-panel-spinel-tianma-nt36532-dsc-3k-video."dtsi
 		// qcom,platform-reset-gpio = <&tlmm 69 GPIO_ACTIVE_HIGH>;
